@@ -123,6 +123,12 @@ are stable from 0.1.0.
   the XO skill keeps it current, and `bearings` folds its waiting items into "Needs you".
 
 ### Fixed
+- herdr dispatch no longer dies on Claude's "trust this folder" dialog. `herdr agent start`
+  answers `agent_not_ready` while it is up; chartroom now answers it (only for a worktree it
+  created, as before) and delivers the brief. A folder it did not create stops dispatch with a
+  message naming the tab. Dispatching again after a start that died closes the stale agent
+  that held the task's name (`agent_name_taken`), but only in the tab chartroom recorded for
+  the task and never while it is working.
 - The dashboard on phones and tablets: the header no longer overlaps itself at tablet widths
   (768px), lane-count labels wrap instead of being cut, no text is under 12px below 1100px,
   every control is a 44px tap target on touch screens, and a card's last event shows up to

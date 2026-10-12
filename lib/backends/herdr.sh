@@ -70,8 +70,25 @@ herdr_deliver() { # <id> <text>
   return 1
 }
 
+# A live agent already named <id> is left over from an earlier start of this task (one that died
+# at startup leaves its agent holding the name, and the next start fails agent_name_taken). It is
+# closed only if it sits in the tab chartroom recorded for this task, never finished its launch
+# (herdr_launched) and is not mid-turn; anything else is not chartroom's to close.
+herdr_clear_stale() { # <id>
+  local id="$1" old st tab
+  herdr_alive "$id" || return 0
+  old="$(meta "$id" herdr_tab)"; st="$(herdr_status "$id")"
+  tab="$(herdr agent get "$id" 2>/dev/null | jq -r '.result.agent.tab_id // empty' || true)"
+  [[ -n "$old" && "$tab" == "$old" ]] || die "a herdr agent named $id already runs in tab ${tab:-?}, which chartroom did not record for this task; close it, then dispatch again"
+  [[ "$(meta "$id" herdr_launched)" != 1 ]] || die "the worker for $id is live in herdr tab $tab; steer it, or close it (chartroom close $id) before dispatching again"
+  [[ "$st" != working ]] || die "the herdr agent for $id is already working in tab $tab; steer it, or close that tab and dispatch again"
+  herdr tab close "$tab" >/dev/null 2>&1 || die "could not close the stale herdr tab $tab for $id"
+  log_event "$id" note "closed the stale herdr tab $tab left by an earlier start ($st)"
+}
+
 herdr_launch() { # <id> <wt> <agent>
   local id="$1" wt="$2" agent="$3" ws pane tab
+  herdr_clear_stale "$id"; meta_set "$id" herdr_launched ""
   crew_workspace "$wt"; ws="$CREW_WS"
   if [[ -n "$CREW_FRESH_PANE" ]]; then
     pane="$CREW_FRESH_PANE"; tab="$CREW_FRESH_TAB"; herdr tab rename "$tab" "$id" >/dev/null
@@ -81,20 +98,27 @@ herdr_launch() { # <id> <wt> <agent>
   fi
   meta_set "$id" herdr_workspace "$ws"; meta_set "$id" herdr_tab "$tab"; meta_set "$id" herdr_pane "$pane"; meta_set "$id" agent "$id"
 
-  local start=(agent start "$id" --kind "$agent" --pane "$pane" --timeout 60000) extra=() out i
+  local start=(agent start "$id" --kind "$agent" --pane "$pane" --timeout 60000) extra=() out i blocked=0
   # herdr starts the agent binary itself; pass the same flags chartroom uses elsewhere.
   mapfile -t extra < <(interactive_argv "$id" "$agent" "$([[ "$agent" == claude ]] && echo prompt || echo 0)" | tail -n +2)
   [[ ${#extra[@]} -gt 0 ]] && start+=(-- "${extra[@]}")
+  # agent_not_ready: the agent came up but is blocked at a startup dialog (usually the folder
+  # trust prompt). herdr keeps the name for read/send-keys, so carry on to the trust handling
+  # below; starting again would only fail agent_name_taken.
   for i in $(seq 1 40); do
     if out="$(herdr "${start[@]}" 2>&1)"; then break; fi
+    if grep -q agent_not_ready <<<"$out"; then blocked=1; log_event "$id" note "herdr: agent blocked at startup; checking for a trust dialog"; break; fi
     grep -q agent_pane_busy <<<"$out" || die "herdr agent start failed: $out"
     sleep 0.5
   done
   sleep 1
-  handle_trust "$id" "$agent" herdr_screen herdr_keys || true
+  if ! handle_trust "$id" "$agent" herdr_screen herdr_keys && [[ $blocked -eq 1 ]]; then
+    die "the $agent worker is waiting at a startup dialog chartroom will not answer; answer it in herdr tab $tab, then dispatch $id again"
+  fi
   herdr agent wait "$id" --until idle --until "done" --timeout 30000 >/dev/null 2>&1 || true
   local rc=0; herdr_deliver "$id" "$(task_prompt "$id")" || rc=$?
   [[ $rc -eq 1 ]] && die "agent started but did not take the brief; inspect tab $tab"
+  meta_set "$id" herdr_launched 1
   echo "herdr $agent worker running (workspace $CR_WORKSPACE, tab $tab)"
 }
 

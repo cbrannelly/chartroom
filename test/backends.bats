@@ -240,6 +240,83 @@ lines"
   events "$id2" | grep -q "agent: awaiting-input: trust dialog for a folder chartroom did not create"
 }
 
+herdr_trust_screen() {
+  printf ' Quick safety check: Is this a project you created or one you trust?\n ❯ No, exit\n   Yes, I trust this folder\n' >"$FAKE_HERDR_DIR/screen"
+}
+
+@test "herdr: a start blocked by the trust dialog is answered, then the brief is delivered" {
+  use_fake herdr claude
+  export FAKE_HERDR_DIR="$BATS_TEST_TMPDIR/herdr"; mkdir -p "$FAKE_HERDR_DIR"; herdr_trust_screen
+  id="$(new_task --backend herdr:claude)"
+  export FAKE_HERDR_TASK="$id"
+  run cr dispatch "$id"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"herdr claude worker running"* ]]
+  [ "$(grep -c "^agent start $id " "$FAKE_HERDR_DIR/calls.log")" -eq 1 ]
+  grep -q "^agent send-keys $id down$" "$FAKE_HERDR_DIR/calls.log"
+  grep -q "^agent send-keys $id enter$" "$FAKE_HERDR_DIR/calls.log"
+  grep -q "^agent prompt $id Read the brief at" "$FAKE_HERDR_DIR/calls.log"
+  events "$id" | grep -q "note: herdr: agent blocked at startup; checking for a trust dialog"
+  events "$id" | grep -q "note: accepted workspace trust for its own worktree"
+  events "$id" | grep -q "agent: prompt-received"
+}
+
+@test "herdr: a stale agent from an earlier start is closed only when it is this task's own" {
+  use_fake herdr claude
+  export FAKE_HERDR_DIR="$BATS_TEST_TMPDIR/herdr"; mkdir -p "$FAKE_HERDR_DIR/agents"
+  echo chartroom-crew >"$FAKE_HERDR_DIR/ws"
+  id="$(new_task --backend herdr:claude)"
+  export FAKE_HERDR_TASK="$id"
+  # an earlier start died at the trust dialog: its agent still holds the name in its recorded tab
+  jq '.herdr_tab="w1:t9"' "$CHARTROOM_HOME/tasks/$id/meta.json" >"$BATS_TEST_TMPDIR/m" && mv "$BATS_TEST_TMPDIR/m" "$CHARTROOM_HOME/tasks/$id/meta.json"
+  echo "w1:p9 w1:t9 blocked" >"$FAKE_HERDR_DIR/agents/$id"
+  run cr dispatch "$id"
+  [ "$status" -eq 0 ]
+  grep -q "^tab close w1:t9$" "$FAKE_HERDR_DIR/calls.log"
+  [ "$(grep -c "^tab create " "$FAKE_HERDR_DIR/calls.log")" -eq 1 ]
+  [ "$(meta_of "$id" herdr_tab)" != "w1:t9" ]
+  events "$id" | grep -q "note: closed the stale herdr tab w1:t9 left by an earlier start (blocked)"
+  events "$id" | grep -q "agent: prompt-received"
+  # a same-named agent in a tab chartroom did not record for the task is never closed
+  id2="$(new_task --backend herdr:claude)"
+  echo "w1:p8 w1:t8 idle" >"$FAKE_HERDR_DIR/agents/$id2"
+  : >"$FAKE_HERDR_DIR/calls.log"
+  FAKE_HERDR_TASK="$id2" run cr dispatch "$id2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"already runs in tab w1:t8, which chartroom did not record"* ]]
+  ! grep -q "^tab close" "$FAKE_HERDR_DIR/calls.log"
+  ! grep -q "^agent start" "$FAKE_HERDR_DIR/calls.log"
+  # nor is this task's own agent while it is mid-turn
+  jq '.herdr_tab="w1:t8"' "$CHARTROOM_HOME/tasks/$id2/meta.json" >"$BATS_TEST_TMPDIR/m" && mv "$BATS_TEST_TMPDIR/m" "$CHARTROOM_HOME/tasks/$id2/meta.json"
+  echo "w1:p8 w1:t8 working" >"$FAKE_HERDR_DIR/agents/$id2"
+  FAKE_HERDR_TASK="$id2" run cr dispatch "$id2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"already working in tab w1:t8"* ]]
+  ! grep -q "^tab close" "$FAKE_HERDR_DIR/calls.log"
+  # nor is a worker whose launch finished, even idle: re-dispatch is not a way to steer it
+  [ "$(meta_of "$id" herdr_launched)" = 1 ]
+  : >"$FAKE_HERDR_DIR/calls.log"
+  run cr dispatch "$id"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"the worker for $id is live in herdr tab"* ]]
+  ! grep -q "^tab close" "$FAKE_HERDR_DIR/calls.log"
+}
+
+@test "herdr: a blocked start in a folder chartroom did not create is never auto-trusted" {
+  use_fake herdr claude
+  export FAKE_HERDR_DIR="$BATS_TEST_TMPDIR/herdr"; mkdir -p "$FAKE_HERDR_DIR"; herdr_trust_screen
+  id="$(new_task --backend herdr:claude)"
+  export FAKE_HERDR_TASK="$id"
+  cr worktree "$id" >/dev/null
+  jq '.worktree_created="0"' "$CHARTROOM_HOME/tasks/$id/meta.json" >"$BATS_TEST_TMPDIR/m" && mv "$BATS_TEST_TMPDIR/m" "$CHARTROOM_HOME/tasks/$id/meta.json"
+  run cr dispatch "$id"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"waiting at a startup dialog chartroom will not answer; answer it in herdr tab"* ]]
+  ! grep -q "^agent send-keys" "$FAKE_HERDR_DIR/calls.log"
+  ! grep -q "^agent prompt" "$FAKE_HERDR_DIR/calls.log"
+  events "$id" | grep -q "agent: awaiting-input: trust dialog for a folder chartroom did not create"
+}
+
 @test "trust answer keys per agent" {
   source "$REPO_ROOT/lib/core.sh"; source "$REPO_ROOT/lib/agents.sh"
   [ "$(trust_answer_keys claude $' ❯ No, exit\n   Yes, I trust this folder')" = "down enter" ]

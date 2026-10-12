@@ -1,3 +1,51 @@
 #!/usr/bin/env bash
-# fake herdr: a server that is not running.
-echo "herdr: could not connect to server socket" >&2; exit 1
+# fake herdr. Without $FAKE_HERDR_DIR: a server that is not running.
+# With it: enough of the CLI for chartroom's herdr runner, state in $FAKE_HERDR_DIR.
+#   $S/screen      what every agent shows (default: a prompt box). A trust dialog there makes
+#                  `agent start` return agent_not_ready with the name kept, as herdr does;
+#                  sending enter clears it.
+#   $S/agents/<n>  live agents, "<pane> <tab> <status>"; a leftover one makes start agent_name_taken.
+# `agent prompt` simulates Claude's UserPromptSubmit hook for task $FAKE_HERDR_TASK.
+[[ -n "${FAKE_HERDR_DIR:-}" ]] || { echo "herdr: could not connect to server socket" >&2; exit 1; }
+S="$FAKE_HERDR_DIR"; mkdir -p "$S/agents"
+printf '%s\n' "$*" >>"$S/calls.log"
+arg() { local k="$1"; shift; while [[ $# -gt 0 ]]; do [[ "$1" == "$k" ]] && { printf '%s' "$2"; return; }; shift; done; }
+err() { printf '{"error":{"code":"%s","message":"%s"},"id":"cli:fake"}\n' "$1" "$2" >&2; exit 1; }
+next() { local n; n=$(( $(cat "$S/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$S/n"; printf '%s' "$n"; }
+screen() { cat "$S/screen" 2>/dev/null || printf '❯ \n'; }
+trust_up() { screen | grep -qiE 'trust this folder|do you trust'; }
+created() { # <workspace id> -> a fresh tab and root pane
+  local n; n="$(next)"
+  printf '{"result":{"workspace":{"workspace_id":"%s"},"tab":{"tab_id":"%s:t%s"},"root_pane":{"pane_id":"%s:p%s"}}}\n' "$1" "$1" "$n" "$1" "$n"
+}
+cmd="${1:-} ${2:-}"; shift 2 || true
+case "$cmd" in
+  "workspace list")
+    if [[ -f "$S/ws" ]]; then printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"%s"}]}}\n' "$(cat "$S/ws")"
+    else echo '{"result":{"workspaces":[]}}'; fi ;;
+  "workspace create") arg --label "$@" >"$S/ws"; created w1 ;;
+  "tab create") created "$(arg --workspace "$@")" ;;
+  "tab close") grep -l " $1 " "$S"/agents/* 2>/dev/null | xargs rm -f ;;
+  "tab rename"|"tab focus") : ;;
+  "agent start")
+    [[ -f "$S/agents/$1" ]] && err agent_name_taken "agent name $1 is already in use"
+    pane="$(arg --pane "$@")"
+    echo "$pane ${pane%:p*}:t${pane##*:p} idle" >"$S/agents/$1"
+    trust_up && err agent_not_ready "agent $1 blocked during startup"
+    printf '{"result":{"agent":{"name":"%s","pane_id":"%s"}}}\n' "$1" "$pane" ;;
+  "agent get")
+    [[ -f "$S/agents/$1" ]] || err agent_not_found "agent target $1 not found"
+    read -r pane tab st <"$S/agents/$1"
+    printf '{"result":{"agent":{"agent_status":"%s","pane_id":"%s","tab_id":"%s"}}}\n' "$st" "$pane" "$tab" ;;
+  "agent read") [[ -f "$S/agents/$1" ]] || err agent_not_found "agent target $1 not found"; screen ;;
+  "agent send-keys")
+    [[ -f "$S/agents/$1" ]] || err agent_not_found "agent target $1 not found"
+    [[ "$2" == enter ]] && trust_up && rm -f "$S/screen" ;;
+  "agent prompt")
+    [[ -f "$S/agents/$1" ]] || err agent_not_found "agent target $1 not found"
+    trust_up && err agent_blocked "agent $1 is waiting at a dialog"
+    [[ -n "${FAKE_HERDR_TASK:-}" ]] && jq -cn --arg p "$2" '{prompt:$p}' | "${CHARTROOM_BIN:?}" hook "$FAKE_HERDR_TASK" prompt-submit ;;
+  "agent wait") : ;;
+  *) err unknown "unknown command $cmd" ;;
+esac
+exit 0
