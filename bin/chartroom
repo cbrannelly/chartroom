@@ -754,7 +754,7 @@ cmd_inbox() {
         w && index($0, "- [" tag "] ") == 1 {
           rest = substr($0, length("- [" tag "] ") + 1); d = ""
           if (match(rest, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][[:space:]]*(—|–|-|:)?[[:space:]]*/)) { d = substr(rest, 1, RLENGTH); rest = substr(rest, RLENGTH + 1) }
-          sub(/^\[[^]]+\] +/, "", rest)
+          if (substr(rest, 1, 1) == "[" && (k = index(rest, "] ")) > 2) { rest = substr(rest, k + 2); sub(/^ +/, "", rest) }
           $0 = "- [" tag "] " d "[" ENVIRON["INBOX_PROJECT"] "] " rest; print $0 > out }
         { print }' -v tag="$tag" -v out="$out"
       if [[ -s "$out" ]]; then cat "$out"; rm -f "$out"; else rm -f "$out"; die "no open inbox item $tag"; fi
