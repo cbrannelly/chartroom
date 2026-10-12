@@ -112,19 +112,39 @@ function tag(item: CrewItem): string {
 
 // ---------------------------------------------------------------- band
 
+/**
+ * One emoji per lane, the band's and the pane's. Each is East Asian Wide on its own code
+ * point (no variation selector), so every terminal draws it two columns wide.
+ */
+export const LANE_EMOJI = {
+  needsYou: '🙋',
+  running: '🏃',
+  onHold: '💤',
+  landed: '✅',
+  failed: '❌',
+} as const
+
+export const LEGEND = `${LANE_EMOJI.needsYou} needs you · ${LANE_EMOJI.running} running · ${LANE_EMOJI.onHold} on hold · ${LANE_EMOJI.landed} landed · ${LANE_EMOJI.failed} failed`
+
 export type Tone = 'plain' | 'dim' | 'warn' | 'error'
 export type Segment = { text: string; tone: Tone }
 
-/** The band's line, fitted to `width` cells (the needs-you list gives way first). */
+/**
+ * The band's line, fitted to `width` columns (the needs-you list gives way first):
+ * `⚓ 🏃 3 · 🙋 2 [shop] 108a, [api] 1b91 · 💤 1 · ✅ 1 · ❌ 1`.
+ */
 export function bandSegments(board: CrewBoard, width: number): Segment[] {
-  const landed = board.ready.length + board.recent.length
-  const needs = board.needs_you
+  const lanes = paneLanes(board)
+  const [needs, running, onHold, landed, failed] = lanes.map(l => l.items) as [CrewItem[], CrewItem[], CrewItem[], CrewItem[], CrewItem[]]
   const head: Segment = { text: '⚓ ', tone: 'plain' }
   const sep: Segment = { text: ' · ', tone: 'dim' }
-  const before: Segment[] = board.in_progress.length ? [{ text: `${board.in_progress.length} running`, tone: 'dim' }] : []
-  const after: Segment[] = []
-  if (board.on_hold.length) after.push({ text: `${board.on_hold.length} on hold`, tone: 'dim' })
-  if (landed) after.push({ text: `${landed} landed`, tone: 'dim' })
+  const count = (emoji: string, n: number, tone: Tone): Segment[] => (n ? [{ text: `${emoji} ${n}`, tone }] : [])
+  const before = count(LANE_EMOJI.running, running.length, 'dim')
+  const after = [
+    ...count(LANE_EMOJI.onHold, onHold.length, 'dim'),
+    ...count(LANE_EMOJI.landed, landed.length, 'dim'),
+    ...count(LANE_EMOJI.failed, failed.length, 'error'),
+  ]
 
   const build = (shown: number): Segment[] => {
     const parts = [...before]
@@ -132,7 +152,7 @@ export function bandSegments(board: CrewBoard, width: number): Segment[] {
       const listed = needs.slice(0, shown).map(tag)
       const more = needs.length - shown
       if (more > 0) listed.push(`+${more} more`)
-      parts.push({ text: `${needs.length} need${needs.length === 1 ? 's' : ''} you: ${listed.join(', ')}`, tone: 'warn' })
+      parts.push({ text: `${LANE_EMOJI.needsYou} ${needs.length} ${listed.join(', ')}`, tone: 'warn' })
     }
     parts.push(...after)
     if (!parts.length) return [head, { text: 'crew idle', tone: 'dim' }]
@@ -151,7 +171,19 @@ export function bandText(board: CrewBoard, width: number): string {
 }
 
 function cells(segs: Segment[]): number {
-  return segs.reduce((n, s) => n + [...s.text].length, 0)
+  return segs.reduce((n, s) => n + columns(s.text), 0)
+}
+
+// Zero columns: combining marks, variation selectors, the zero-width joiner and friends.
+const ZERO = /^[\p{Mn}\p{Me}\u200B-\u200F\uFE00-\uFE0F]$/u
+// Two columns: emoji drawn as emoji by default, and the East Asian wide blocks.
+const WIDE = /^[\p{Emoji_Presentation}\u1100-\u115F\u2E80-\u303E\u3041-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{20000}-\u{3FFFD}]$/u
+
+/** How many terminal columns `text` takes: emoji and CJK are two, joiners and selectors none. */
+export function columns(text: string): number {
+  let n = 0
+  for (const ch of text) n += ZERO.test(ch) ? 0 : WIDE.test(ch) ? 2 : 1
+  return n
 }
 
 // ---------------------------------------------------------------- pane
@@ -168,30 +200,39 @@ export function age(iso: string | null, nowMs: number): string {
   return `${Math.floor(s / 86400)}d`
 }
 
-export type PaneLane = { title: string; items: CrewItem[] }
+export type PaneLane = { title: string; emoji: string; items: CrewItem[] }
 
 /** The pane's lanes in order: needs you, running, on hold, landed, failed. */
 export function paneLanes(board: CrewBoard): PaneLane[] {
   return [
-    { title: 'NEEDS YOU', items: board.needs_you.filter(i => i.state !== 'failed') },
-    { title: 'RUNNING', items: board.in_progress },
-    { title: 'ON HOLD', items: board.on_hold },
-    { title: 'LANDED', items: [...board.ready, ...board.recent] },
-    { title: 'FAILED', items: board.needs_you.filter(i => i.state === 'failed') },
+    { title: 'NEEDS YOU', emoji: LANE_EMOJI.needsYou, items: board.needs_you.filter(i => i.state !== 'failed') },
+    { title: 'RUNNING', emoji: LANE_EMOJI.running, items: board.in_progress },
+    { title: 'ON HOLD', emoji: LANE_EMOJI.onHold, items: board.on_hold },
+    { title: 'LANDED', emoji: LANE_EMOJI.landed, items: [...board.ready, ...board.recent] },
+    { title: 'FAILED', emoji: LANE_EMOJI.failed, items: board.needs_you.filter(i => i.state === 'failed') },
   ]
 }
 
-function fit(text: string, width: number): string {
-  const chars = [...text]
-  if (chars.length <= width) return text + ' '.repeat(width - chars.length)
-  return width <= 1 ? chars.slice(0, width).join('') : `${chars.slice(0, width - 1).join('')}…`
+/** `text` padded or cut (with `…`) to exactly `width` columns. */
+export function fit(text: string, width: number): string {
+  const used = columns(text)
+  if (used <= width) return text + ' '.repeat(width - used)
+  let out = ''
+  let n = 0
+  for (const ch of text) {
+    const w = columns(ch)
+    if (n + w > width - 1) break
+    out += ch
+    n += w
+  }
+  return `${out}…${' '.repeat(Math.max(0, width - 1 - n))}`
 }
 
 export type PaneLine = { key: string; text: string; tone: Tone; bold?: boolean }
 
 /**
- * The pane's lines sized to `width` cells: a header per lane with items, NEEDS YOU
- * always, then one row per item: `[project] short_id title state age`.
+ * The pane's lines sized to `width` columns: the emoji legend, then a header per lane with
+ * items, NEEDS YOU always, each followed by one row per item: `[project] short_id title state age`.
  */
 export function paneLines(board: CrewBoard, width: number, nowMs: number): PaneLine[] {
   const lanes = paneLanes(board)
@@ -202,10 +243,10 @@ export function paneLines(board: CrewBoard, width: number, nowMs: number): PaneL
   const ageW = 3
   const fixed = 2 + projW + 1 + idW + 1 + 1 + stateW + 1 + ageW
   const titleW = Math.max(8, width - fixed)
-  const lines: PaneLine[] = []
+  const lines: PaneLine[] = [{ key: 'legend', text: LEGEND, tone: 'dim' }]
   for (const lane of lanes) {
     if (!lane.items.length && lane.title !== 'NEEDS YOU') continue
-    lines.push({ key: `h-${lane.title}`, text: `${lane.title} (${lane.items.length})`, tone: lane.title === 'NEEDS YOU' && lane.items.length ? 'warn' : lane.title === 'FAILED' ? 'error' : 'plain', bold: true })
+    lines.push({ key: `h-${lane.title}`, text: `${lane.emoji} ${lane.title} (${lane.items.length})`, tone: lane.title === 'NEEDS YOU' && lane.items.length ? 'warn' : lane.title === 'FAILED' ? 'error' : 'plain', bold: true })
     for (const [n, item] of lane.items.entries()) {
       const row = `  ${label(item).padEnd(projW)} ${item.short_id.padEnd(idW)} ${fit(item.title, titleW)} ${item.state.padEnd(stateW)} ${age(item.last_at, nowMs).padStart(ageW)}`
       lines.push({ key: `r-${lane.title}-${n}`, text: row, tone: lane.title === 'LANDED' ? 'dim' : 'plain' })

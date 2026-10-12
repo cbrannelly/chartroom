@@ -7,11 +7,14 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
-- `mods/crew-view`, a Claude Code mod: the crew live in the XO's session, as a band above the
-  prompt (running, needs you with each item's project, on hold, landed) and a `/crew` pane with
-  the board's lanes, polling `chartroom board --json` every 15 s. It is inert in every other
-  session (workers, `claude -p`, worktrees), detected from env and files without running a
-  process. Listed in the marketplace: `/plugin install crew-view@chartroom`.
+- `mods/crew-view`, a Claude Code mod: the crew live in the XO's session, as a one-line band
+  above the prompt with one emoji per lane and each needs-you item's project
+  (`⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · 💤 1 · ✅ 1 · ❌ 1`, emoji counted as two
+  columns so it never overflows) and a `/crew` pane with the legend and the board's lanes,
+  polling `chartroom board --json` every 15 s. It wakes only once the session loads the
+  `captain` or `chartroom` skill, and only in the XO's session; it stays inert in every other
+  (workers, `claude -p`, worktrees), detected from env and files without running a process.
+  Listed in the marketplace: `/plugin install crew-view@chartroom`.
 - Every question carries its project. `chartroom inbox add --project P <text>` writes
   `- [i-xxxx] <date> — [P] <text>` (a repo path is reduced to its directory name; any other
   name, such as `multi`, is kept), and `chartroom inbox project <i-xxxx> <P>` labels an

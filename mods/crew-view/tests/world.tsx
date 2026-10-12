@@ -1,6 +1,7 @@
 // A fake world beneath the plugin: env, files, the chartroom CLI and the clock.
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 export const HOME = '/srv/xo'
 
@@ -82,7 +83,15 @@ export function install(on: On, world: World) {
     commands.push(e.name)
     return { value: { command: e.name } }
   })
+  // The engine's skill expansion: the prompt text as the skill computed it.
+  on('skill.prompt', ($, e) => ({ text: e.text }))
   return { runs, commands, clock }
+}
+
+/** Starts a session in `cwd` and loads `skill` in it, as `/captain` or the Skill tool does. */
+export async function startXo($: Engine, cwd = `${HOME}/.captain`, skill = 'captain') {
+  await $.session.start({ cwd, surface: 'terminal', isInteractive: true })
+  return $.skill.prompt({ skill, text: `the ${skill} skill` })
 }
 
 export const BAND_PROPS = (bodyColumns: number) => ({

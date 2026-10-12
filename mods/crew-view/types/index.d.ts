@@ -30,6 +30,8 @@ declare module 'claude-code' {
     'crew-view': {
       /** True once session.start decided this is the XO's session. */
       isXo: boolean
+      /** True once the session loaded the captain or chartroom skill; never reset. */
+      active: boolean
       /** The last board read; kept while a later poll fails. */
       board: CrewBoard | null
       /** Why the last poll failed, or null. */

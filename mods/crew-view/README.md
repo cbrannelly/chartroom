@@ -3,25 +3,38 @@
 A Claude Code mod (function hooks, Claude Code 2.1.296 or newer) that shows the chartroom crew
 live inside the XO's session:
 
-- **A band above the prompt**, one line, every item that needs you labelled with its project:
+- **A band above the prompt**, one line, one emoji per lane with its count, every item that
+  needs you labelled with its project:
 
   ```
-  ⚓ 3 running · 2 need you: [shop] 108a, [billing] 9c1e · 1 landed               [ crew ]
+  ⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · 💤 1 · ✅ 1 · ❌ 1                [ crew ]
   ```
 
-  `on hold` appears only when something is. A narrow terminal cuts the needs-you list to
+  | | lane |
+  | --- | --- |
+  | 🏃 | running |
+  | 🙋 | needs you (a decision, a blocker, an inbox item) |
+  | 💤 | on hold |
+  | ✅ | landed |
+  | ❌ | failed |
+
+  A lane appears only when something is in it. Each emoji is wide on its own code point (no
+  variation selector, so no `⏸️`), and the band counts it as two columns. A narrow terminal cuts the needs-you list to
   `+N more`, never mid-item. `[ crew ]` (or its hotkey `c` once the band has focus: ctrl+x tab or a
   click) opens the pane. If `chartroom` is missing or fails, the band shows one dim error line.
-- **A `/crew` pane** with the board's lanes (needs you, running, on hold, landed, failed), one
-  row per item: `[project] short_id title state age-of-last-event`, sized to the pane.
+- **A `/crew` pane** led by the emoji legend, then the board's lanes (needs you, running, on
+  hold, landed, failed), one row per item: `[project] short_id title state age-of-last-event`,
+  sized to the pane.
 
-It reads `chartroom board --json` (chartroom on PATH, else `~/.local/bin/chartroom`) when the
-session starts, every 15 seconds after, and whenever the pane opens.
+It reads `chartroom board --json` (chartroom on PATH, else `~/.local/bin/chartroom`) when it
+wakes, every 15 seconds after, and whenever the pane opens.
 
-## XO only
+## XO only, once the skill is loaded
 
 Installed at user scope, the mod loads in every Claude Code session, crew workers' included. It
-does nothing (no command, no timer, no process, no drawing) unless all of these hold:
+does nothing (no command, no timer, no process, no drawing) until the session loads the
+`captain` or `chartroom` skill (`/captain`, `/chartroom`, or the Skill tool; the `skill.prompt`
+event), and then only if all of these hold:
 
 1. the session is interactive (not `claude -p`);
 2. `CHARTROOM_TASK` is unset;
@@ -31,7 +44,9 @@ does nothing (no command, no timer, no process, no drawing) unless all of these 
    (`$CHARTROOM_CONFIG` or `${XDG_CONFIG_HOME:-~/.config}/chartroom/config`), then `~/.chartroom`
    (or a pre-existing `~/.captain`).
 
-The check reads environment variables and files only; it never runs a process.
+The check reads environment variables and files only; it never runs a process. Once awake the
+mod stays awake for the session (kept in `$.state`, so a hot reload keeps it). If a resumed session
+(`claude --resume`) comes back without the band, load the skill again.
 
 ## Install
 

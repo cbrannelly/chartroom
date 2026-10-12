@@ -1,9 +1,11 @@
 // crew-view: chartroom's crew, live in the XO's Claude Code session.
 //
-// Installed at user scope it loads in every Claude session, crew workers' included, so
-// session.start first decides whether this is the XO's session (interactive, cwd is the
-// chartroom home, not under worktrees/, not a task's session). Anywhere else it registers
-// nothing, starts no timer, runs no process and draws nothing.
+// Installed at user scope it loads in every Claude session, crew workers' included. It wakes
+// only when both hold: session.start decided this is the XO's session (interactive, cwd is the
+// chartroom home, not under worktrees/, not a task's session), and the session has loaded the
+// `captain` or `chartroom` skill (skill.prompt: `/captain`, the Skill tool, or a preload). Until
+// then it registers nothing, starts no timer, runs no process and draws nothing. Once awake it
+// stays awake for the session; $.state keeps that across a hot reload.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -14,7 +16,10 @@ import type { Tone } from './crew'
 const PANE = 'crew'
 const POLL_MS = 15_000
 
+const XO_SKILLS = ['captain', 'chartroom']
+
 const isXo = atom({ plugin: 'crew-view', key: 'isXo' } as const, false)
+const active = atom({ plugin: 'crew-view', key: 'active' } as const, false)
 const board = atom({ plugin: 'crew-view', key: 'board' } as const, null as CrewBoard | null)
 const error = atom({ plugin: 'crew-view', key: 'error' } as const, null as string | null)
 
@@ -72,6 +77,8 @@ async function runBoard($: EngineInterface): Promise<{ stdout: string } | { erro
 // The XO's chartroom home, set by session.start; a reload re-runs it.
 let home = ''
 let polling = false
+// Whether this load of the module has registered /crew and started the timer.
+let started = false
 
 /** Reads the board into $.state; never throws, never overlaps a run still going. */
 async function poll($: EngineInterface): Promise<void> {
@@ -100,25 +107,50 @@ async function openPane($: EngineInterface) {
   return $.ui.open({ id: PANE, title: 'Crew' })
 }
 
+/** True when this is the XO's session and it has loaded the captain or chartroom skill. */
+async function isActive($: EngineInterface): Promise<boolean> {
+  return (await read($, isXo)) && (await read($, active))
+}
+
+/** Registers /crew, reads the board and starts the poll; once per load of the module. */
+async function start($: EngineInterface): Promise<void> {
+  if (started) return
+  started = true
+  await $.command.register({ name: 'crew', description: "Show chartroom's crew: needs you, running, on hold, landed, failed" })
+  void poll($)
+  $.clock.every(POLL_MS, () => void poll($))
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const xo = await detectXo($, e.cwd, e.isInteractive).catch(() => null)
     await update($, isXo, () => xo !== null)
     if (xo === null) return next(e)
     home = xo
-    await $.command.register({ name: 'crew', description: "Show chartroom's crew: needs you, running, on hold, landed, failed" })
-    void poll($)
-    $.clock.every(POLL_MS, () => void poll($))
+    // A hot reload of a session that already loaded the skill picks up where it was.
+    if (await read($, active)) await start($)
     return next(e)
   })
 
+  // `/captain`, `/chartroom`, the Skill tool or a preload: the session is the XO's in earnest.
+  // A plugin's skill arrives as `plugin:skill`. The prompt text passes through untouched.
+  on('skill.prompt', async ($, e, next) => {
+    const name = e.skill.split(':').pop() ?? ''
+    if (XO_SKILLS.includes(name) && (await read($, isXo))) {
+      await update($, active, () => true)
+      await start($)
+    }
+    return next(e)
+  })
+
+  // /crew exists only once start() registered it.
   on('command.run', { command: 'crew' }, async $ => {
     const opened = await openPane($)
     return { text: opened.isPlaced ? 'Crew pane opened.' : 'Crew pane is waiting for room: widen the terminal.' }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || !(await read($, isXo))) return next(e)
+    if (e.props.hasSurvey || !(await isActive($))) return next(e)
     const b = await read($, board)
     const err = await read($, error)
     if (!b && !err) return next(e)
@@ -146,7 +178,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if (!(await read($, isXo))) return next(e)
+    if (!(await isActive($))) return next(e)
     const { Box, Text } = $.ui.resolve(e)
     const b = await read($, board)
     const err = await read($, error)
