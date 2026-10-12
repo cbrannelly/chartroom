@@ -45,7 +45,7 @@ test('CHARTROOM_HOME in the environment wins over the config file', async ($, on
   expect(w.commands).toEqual(['crew'])
 })
 
-test('with no config, the home is ~/.captain when only it exists, else ~/.chartroom', async ($, on) => {
+test('with no config file, a pre-existing ~/.captain (and no ~/.chartroom) is the home', async ($, on) => {
   const world = XO_WORLD()
   world.files = {}
   const w = install(on, world)

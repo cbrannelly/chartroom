@@ -54,7 +54,6 @@ async function detectXo($: EngineInterface, cwd: string, isInteractive: boolean)
 /** One `chartroom board --json` run: `chartroom` on PATH, then ~/.local/bin (a thin GUI PATH). */
 async function runBoard($: EngineInterface): Promise<{ stdout: string } | { error: string }> {
   const home = (await $.env.get('HOME')) ?? ''
-  let lastError = 'chartroom not found'
   for (const bin of ['chartroom', `${home}/.local/bin/chartroom`]) {
     try {
       const ran = await $.process.run([bin, 'board', '--json'], { timeoutMs: 20_000 })
@@ -64,10 +63,10 @@ async function runBoard($: EngineInterface): Promise<{ stdout: string } | { erro
       return { error: `chartroom board failed${why ? `: ${why}` : ` (exit ${ran.exitCode})`}` }
     } catch (err) {
       // A rejection is a command that could not start, or one still running at the timeout.
-      lastError = /timed? ?out/i.test(String(err)) ? 'chartroom board timed out' : 'chartroom not found'
+      if (/timed? ?out/i.test(String(err))) return { error: 'chartroom board timed out' }
     }
   }
-  return { error: lastError }
+  return { error: 'chartroom not found' }
 }
 
 // The XO's chartroom home, set by session.start; a reload re-runs it.
