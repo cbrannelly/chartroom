@@ -9,6 +9,13 @@
       "description": "The chartroom and bearings skills. The plugin ships the skills; put the chartroom CLI on PATH with install.sh (or call bin/chartroom from the plugin directory).",
       "version": "0.1.0",
       "license": "MIT"
+    },
+    {
+      "name": "crew-view",
+      "source": "./mods/crew-view",
+      "description": "A Claude Code mod: the crew live in the XO's session, a band above the prompt and a /crew pane. Inert in every other session.",
+      "version": "0.1.0",
+      "license": "MIT"
     }
   ]
 }

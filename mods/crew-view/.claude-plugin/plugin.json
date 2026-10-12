@@ -1,0 +1,9 @@
+{
+  "name": "crew-view",
+  "version": "0.1.0",
+  "description": "chartroom's crew, live in the XO's Claude Code session: a band above the prompt and a /crew pane.",
+  "author": { "name": "wolzey", "url": "https://github.com/wolzey" },
+  "homepage": "https://github.com/wolzey/chartroom",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

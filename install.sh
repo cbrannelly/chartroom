@@ -80,4 +80,5 @@ Next:
   chartroom doctor                     # what can run on this machine
   chartroom install-skills             # link the skills into your agents (--claude, --agents, --pi, --all)
   cd ~/.chartroom && claude            # or codex, gemini, ...: that session is your XO
+  /plugin install crew-view@chartroom  # optional, at a Claude Code prompt: the crew live above the prompt
 MSG

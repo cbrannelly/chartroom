@@ -77,6 +77,22 @@ Per agent:
 | pi | `chartroom install-skills --pi` | same as Codex |
 | opencode, Cursor, Amp, Copilot, others | paste [`adapters/agents-md/AGENTS.md`](adapters/agents-md/AGENTS.md) into the agent's instructions, or start it in `~/.chartroom` (its `AGENTS.md` points at the skill) | same as Codex |
 
+### A live crew view in Claude Code
+
+`mods/crew-view` is a Claude Code mod (2.1.296 or newer) that draws the crew inside the XO's
+session: a one-line band above the prompt (`⚓ 3 running · 2 need you: [shop] 108a, [billing]
+9c1e · 1 landed`, every item that needs you labelled with its project) and a `/crew` pane with
+the board's lanes. It polls `chartroom board --json` every 15 seconds. Install it at user scope:
+
+```
+/plugin install crew-view@chartroom
+```
+
+It stays inert (no command, timer, process or drawing) in every session but the XO's: an
+interactive one whose working directory is the chartroom home, not under `worktrees/`, with no
+`CHARTROOM_TASK`. Installed from a local checkout (`claude plugin marketplace add <checkout>`),
+`/reload-plugins` picks up edits. See [mods/crew-view/README.md](mods/crew-view/README.md).
+
 ### Windows
 
 chartroom is bash, so on Windows it runs in WSL2 or in Git Bash. It doesn't run in

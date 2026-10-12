@@ -7,6 +7,11 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
+- `mods/crew-view`, a Claude Code mod: the crew live in the XO's session, as a band above the
+  prompt (running, needs you with each item's project, on hold, landed) and a `/crew` pane with
+  the board's lanes, polling `chartroom board --json` every 15 s. It is inert in every other
+  session (workers, `claude -p`, worktrees), detected from env and files without running a
+  process. Listed in the marketplace: `/plugin install crew-view@chartroom`.
 - The dashboard on the network: `chartroom dashboard --host ADDR` binds another IPv4 address
   and `--expose` every interface (`CHARTROOM_DASHBOARD_HOST` sets the default; it stays
   `127.0.0.1`). Beyond loopback every request but `/healthz` needs an access token
