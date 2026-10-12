@@ -25,8 +25,10 @@ never from conversation memory. (If `chartroom` is not on PATH, use
 2. Write the digest in exactly these four sections, omitting any section that's empty:
 
    **Needs you**: decisions and blockers only a human can resolve, highest impact first.
-   One line each: the project, the question, and the recommendation. Include every open item
-   under "Waiting on the commander" in `inbox.md`.
+   One line each, project first: `**[<project>]** <question> (recommend: <option>)`. Use
+   `**[multi]**` for a question that spans projects, `**[chartroom]**` for one about the crew
+   itself. Include every open item under "Waiting on the commander" in `inbox.md`, with the
+   `[project]` its line carries (an unlabelled line: infer it from the question, else say so).
 
    **Ready**: finished work waiting for the commander's word (review, merge, or PR). One line
    each: the outcome, the risk, the evidence ("tests pass", "3 files"), and the full PR URL if there is one.
@@ -43,7 +45,8 @@ never from conversation memory. (If `chartroom` is not on PATH, use
    one line.
 
 3. If **Needs you** is non-empty, walk the decisions one at a time, starting with the
-   highest-impact one. Ask the question, wait for the answer, and carry it out through the
+   highest-impact one. Ask the question, led by its project as in the digest (with a question
+   tool, its header is the project name), wait for the answer, and carry it out through the
    chartroom skill's rules (`chartroom steer` to relay it, and record lasting preferences with
    `chartroom rule add`). Then move to the next one.
 

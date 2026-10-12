@@ -191,7 +191,7 @@ EOF
   [ "$(cr status --json | jq -r '.[0].state')" = waiting-overdue ]
   run cr watch --once --timeout 5
   [ "$status" -eq 0 ]
-  [[ "$output" == *"[$id] waiting overdue: review from the docs team (since "* ]]
+  [[ "$output" == *"[$id] [proj] waiting overdue: review from the docs team (since "* ]]
   grep -q ' note: waiting overdue: review from the docs team' "$CHARTROOM_HOME/tasks/$id/events.log"
   run cr watch --once --timeout 2
   [ "$status" -eq 124 ]
@@ -442,4 +442,69 @@ shorts() { cr status --all --json | jq -r 'map("\(.id)=\(.short_id)") | join(" "
   id="$(cr inbox add 'use C:\new\tdir & "quotes"?')"
   grep -qxF -- "- [$id] $(date +%F) — use C:\\new\\tdir & \"quotes\"?" "$CHARTROOM_HOME/inbox.md"
   [ "$(cr resolve "$id" --json | jq -r .text)" = 'use C:\new\tdir & "quotes"?' ]
+}
+
+@test "inbox add --project: labels the line; a path becomes its name; bad names fail" {
+  cr init >/dev/null
+  run cr inbox add --project webapp "which region for staging?"
+  [ "$status" -eq 0 ]
+  local a="$output"
+  grep -qxF -- "- [$a] $(date +%F) — [webapp] which region for staging?" "$CHARTROOM_HOME/inbox.md"
+  # a repo path is reduced to its directory name, as status shows it; the flag may follow the text
+  b="$(cr inbox add "merge the parser PR?" --project "$PROJECT/")"
+  grep -qxF -- "- [$b] $(date +%F) — [proj] merge the parser PR?" "$CHARTROOM_HOME/inbox.md"
+  c="$(cr inbox add --project=multi "both repos need the new key?")"
+  grep -qxF -- "- [$c] $(date +%F) — [multi] both repos need the new key?" "$CHARTROOM_HOME/inbox.md"
+  # resolve --json carries the project, split off the text
+  [ "$(cr resolve "$a" --json | jq -c '[.project, .text, .date]')" = "[\"webapp\",\"which region for staging?\",\"$(date +%F)\"]" ]
+  cp "$CHARTROOM_HOME/inbox.md" "$BATS_TEST_TMPDIR/before"
+  for bad in "" "   " "a]b" "[x" $'two\nlines'; do
+    run cr inbox add --project "$bad" "q?"
+    [ "$status" -ne 0 ]
+  done
+  run cr inbox add --project
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: chartroom inbox add [--project P] <text>"* ]]
+  cmp "$CHARTROOM_HOME/inbox.md" "$BATS_TEST_TMPDIR/before"   # nothing written on a refusal
+}
+
+@test "inbox: unlabelled items still read (project null); tag and project label them" {
+  cr init >/dev/null
+  old="$(cr inbox add "an old question")"
+  [ "$(cr resolve "$old" --json | jq -c '[.project, .text]')" = '[null,"an old question"]' ]
+  # a hand-written labelled line gets its id from `inbox tag` and keeps its label
+  perl -0pi -e 's/(## Approvals)/- 2026-01-03 — [billing] hand written\n\n$1/' "$CHARTROOM_HOME/inbox.md"
+  run cr inbox tag
+  [[ "$output" =~ ^tagged\ (i-[0-9a-f]{4}):\ 2026-01-03\ —\ \[billing\]\ hand\ written$ ]]
+  local h="${BASH_REMATCH[1]}"
+  [ "$(cr resolve "$h" --json | jq -c '[.project, .text, .date]')" = '["billing","hand written","2026-01-03"]' ]
+  # the migration helper labels an existing item, and relabels one in place
+  run cr inbox project "$old" webapp
+  [ "$status" -eq 0 ]
+  grep -qxF -- "- [$old] $(date +%F) — [webapp] an old question" "$CHARTROOM_HOME/inbox.md"
+  cr inbox project "[$h]" chartroom >/dev/null
+  grep -qxF -- "- [$h] 2026-01-03 — [chartroom] hand written" "$CHARTROOM_HOME/inbox.md"
+  [ "$(grep -c '^- \[i-' "$CHARTROOM_HOME/inbox.md")" -eq 2 ]
+  run cr inbox project i-ffff webapp
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no open inbox item i-ffff"* ]]
+  run cr inbox project "$old" "a]b"
+  [ "$status" -ne 0 ]
+  [[ "$(cr status)" == *"inbox: 2 waiting on the commander"* ]]
+}
+
+@test "status puts the project after the id; watch wakes carry the project" {
+  cr init >/dev/null
+  run cr watch --once --timeout 1
+  id="$(new_task --backend command --command "$STUB {id}")"
+  cr event "$id" decision "pick A or B (recommend A)"
+  run cr status
+  [ "$(head -1 <<<"$output" | tr -s ' ')" = "ID PROJECT STATE LIVE BACKEND KIND LAST" ]
+  grep -qE "^$id +proj +drafting " <<<"$output"   # not dispatched: the event still shows under LAST
+  run cr watch --once --timeout 5
+  [ "$status" -eq 0 ]
+  grep -qE "^\[$id\] \[proj\] [^ ]+ decision: pick A or B \(recommend A\)$" <<<"$output"
+  cr event "$id" blocked "needs a token"
+  run cr watch --once --timeout 5
+  grep -qE "^\[$id\] \[proj\] [^ ]+ blocked: needs a token$" <<<"$output"
 }

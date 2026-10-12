@@ -12,6 +12,19 @@ are stable from 0.1.0.
   the board's lanes, polling `chartroom board --json` every 15 s. It is inert in every other
   session (workers, `claude -p`, worktrees), detected from env and files without running a
   process. Listed in the marketplace: `/plugin install crew-view@chartroom`.
+- Every question carries its project. `chartroom inbox add --project P <text>` writes
+  `- [i-xxxx] <date> — [P] <text>` (a repo path is reduced to its directory name; any other
+  name, such as `multi`, is kept), and `chartroom inbox project <i-xxxx> <P>` labels an
+  existing item. Inbox items in `dashboard --json` / `board --json` and `resolve --json` gain a
+  `project` field (`null` on an unlabelled line, so older inboxes read as before; nothing else in
+  the JSON changes). `board` prints `[project]` after the short id on every line, the dashboard
+  shows the project above the title on Needs you cards (and next to chat approvals), `status`
+  puts the PROJECT column right after ID, and every `watch` wake reads
+  `[<id>] [<project>] <event>`. The chartroom, bearings and continue skills make it a hard rule:
+  every question, decision or approval the XO puts to the commander leads with
+  `**[project]**` (or `**[project · short id]**`, `**[multi]**`, `**[chartroom]**`), and a
+  structured question tool's header (AskUserQuestion's chip) is the project name, never a
+  generic word.
 - The dashboard on the network: `chartroom dashboard --host ADDR` binds another IPv4 address
   and `--expose` every interface (`CHARTROOM_DASHBOARD_HOST` sets the default; it stays
   `127.0.0.1`). Beyond loopback every request but `/healthz` needs an access token

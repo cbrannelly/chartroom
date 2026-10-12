@@ -634,7 +634,7 @@ status_rows() { # [--all] [--id ID]
     jq -c --arg st "$st" --arg live "$live" --arg last "${lastline:21}" --arg last_at "${lastline:0:20}" \
       --argjson wait "${wait:-null}" --argjson shorts "$shorts" \
       --argjson has_report "$([[ -s "$d/report.md" ]] && echo true || echo false)" \
-      '{id,title,kind,backend:(if (.backend//"")=="" then "auto" else .backend end),project:((.project//"")|split("/")|last),
+      '{id,title,kind,backend:(if (.backend//"")=="" then "auto" else .backend end),project:((.project//"")|rtrimstr("/")|split("/")|last),
         state:$st,live:$live,created,last:$last,last_at:(if $last_at=="" then null else $last_at end),
         updated,dispatched,closed,branch,has_report:$has_report,
         waiting_on:($wait.on // null),waiting_until:($wait.until // null),waiting_since:($wait.since // null),
@@ -649,8 +649,9 @@ cmd_status() {
   if [[ $json -eq 1 ]]; then printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s .; return; fi
   if [[ ${#rows[@]} -eq 0 ]]; then echo "no open tasks"
   else
-    printf '%s\n' "${rows[@]}" | jq -r '[.id,.state,.live,.backend,.project,.kind,(.last|.[0:70])] | @tsv' |
-      { printf 'ID\tSTATE\tLIVE\tBACKEND\tPROJECT\tKIND\tLAST\n'; cat; } | table
+    # The project comes right after the id, so a decision or blocker is placed at a glance.
+    printf '%s\n' "${rows[@]}" | jq -r '[.id,(if .project == "" then "-" else .project end),.state,.live,.backend,.kind,(.last|.[0:70])] | @tsv' |
+      { printf 'ID\tPROJECT\tSTATE\tLIVE\tBACKEND\tKIND\tLAST\n'; cat; } | table
   fi
   inbox_line
 }
@@ -695,6 +696,18 @@ inbox_rewrite() { # <awk program> [awk -v assignments...]
     '"$prog" "$f" >"$f.tmp" && mv "$f.tmp" "$f"
 }
 
+# An inbox item's project label: a repo path is reduced to its directory name (as status
+# rows show it); any other name is kept as given, so cross-project labels such as "multi" or
+# "chartroom" work without a repo. It must fit inside "[...]" on one line.
+inbox_project() { # <name-or-path> -> the label
+  local p="$1"
+  p="$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' <<<"$p")"
+  [[ "$p" == */* ]] && { p="${p%/}"; p="${p##*/}"; }
+  [[ -n "$p" ]] || die "inbox: --project needs a project name"
+  [[ "$p" != *[][]* && "$p" != *[[:cntrl:]]* ]] || die "inbox: a project name cannot contain brackets or control characters: '$p'"
+  printf '%s' "$p"
+}
+
 cmd_inbox() {
   local sub="${1:-}"; shift || true
   case "$sub" in
@@ -707,10 +720,18 @@ cmd_inbox() {
         { print }' -v out="$out"
       cat "$out"; rm -f "$out"
       ;;
-    add) # add <text>: a dated, tagged "Waiting" item at the end of that section; prints its id
-      [[ $# -ge 1 && -n "$*" ]] || die "usage: chartroom inbox add <text>"
+    add) # add [--project P] <text>: a dated, tagged "Waiting" item at the end of that section; prints its id
+      local project="" words=()
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --project) [[ $# -ge 2 ]] || die "usage: chartroom inbox add [--project P] <text>"; project="$(inbox_project "$2")" || exit 1; shift 2 ;;
+          --project=*) project="$(inbox_project "${1#--project=}")" || exit 1; shift ;;
+          *) words+=("$1"); shift ;;
+        esac
+      done
+      [[ ${#words[@]} -ge 1 && -n "${words[*]}" ]] || die "usage: chartroom inbox add [--project P] <text>"
       local out; out="$(mktemp)"
-      INBOX_TEXT="$*" inbox_rewrite '
+      INBOX_TEXT="${project:+[$project] }${words[*]}" inbox_rewrite '
         function put() { if (!done) { t = newtag(); print "- [" t "] " date " — " ENVIRON["INBOX_TEXT"]; print t > out; done = 1 } }
         function flush() { while (blank > 0) { print ""; blank-- } }
         /^## / { if (w) put(); flush(); w = ($0 ~ /^## Waiting/); seen = seen || w; print; next }
@@ -721,7 +742,24 @@ cmd_inbox() {
         -v date="$(date +%F)" -v out="$out"
       cat "$out"; rm -f "$out"
       ;;
-    *) die "usage: chartroom inbox add <text> | inbox tag" ;;
+    project) # project <i-xxxx> <P>: label (or relabel) an open Waiting item; for items added without one
+      [[ $# -eq 2 ]] || die "usage: chartroom inbox project <i-xxxx> <project>"
+      local tag project out
+      tag="$(tr '[:upper:]' '[:lower:]' <<<"$1" | sed -E 's/^\[//; s/\]$//')"
+      [[ "$tag" =~ ^i-[0-9a-f]{4,}$ ]] || die "inbox project: '$1' is not an inbox id (i-xxxx)"
+      project="$(inbox_project "$2")" || exit 1
+      out="$(mktemp)"
+      INBOX_PROJECT="$project" inbox_rewrite '
+        /^## / { w = ($0 ~ /^## Waiting/) }
+        w && index($0, "- [" tag "] ") == 1 {
+          rest = substr($0, length("- [" tag "] ") + 1); d = ""
+          if (match(rest, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][[:space:]]*(—|–|-|:)?[[:space:]]*/)) { d = substr(rest, 1, RLENGTH); rest = substr(rest, RLENGTH + 1) }
+          sub(/^\[[^]]+\] +/, "", rest)
+          $0 = "- [" tag "] " d "[" ENVIRON["INBOX_PROJECT"] "] " rest; print $0 > out }
+        { print }' -v tag="$tag" -v out="$out"
+      if [[ -s "$out" ]]; then cat "$out"; rm -f "$out"; else rm -f "$out"; die "no open inbox item $tag"; fi
+      ;;
+    *) die "usage: chartroom inbox add [--project P] <text> | inbox project <i-xxxx> <project> | inbox tag" ;;
   esac
 }
 
@@ -736,7 +774,7 @@ cmd_resolve() {
   [[ -n "$q" ]] || die "usage: chartroom resolve <id|short id> [--json]"
   local item="" task="" shorts
   if [[ "$q" =~ ^i-[0-9a-f]{4,}$ ]]; then
-    item="$(dashboard_inbox | jq -c --arg q "$q" '.waiting[] | select(.short_id == $q) | {type: "inbox", id: .short_id, short_id, section: "waiting", date, text}' | head -1)"
+    item="$(dashboard_inbox | jq -c --arg q "$q" '.waiting[] | select(.short_id == $q) | {type: "inbox", id: .short_id, short_id, section: "waiting", date, project, text}' | head -1)"
   fi
   shorts="$(short_ids_json)"
   if [[ -f "$(tdir "$q")/meta.json" ]]; then task="$q"
@@ -852,7 +890,12 @@ ensure_cursor() {
   done >"$CURSOR_FILE"
 }
 WOKE=0
-wake() { printf '[%s] %s\n' "$1" "$2"; WOKE=1; }
+# "[<id>] [<project>] <what>": the project travels with every wake, so the XO relays a
+# question already labelled with where it comes from.
+wake() {
+  local p; p="$(project_label "$1")"
+  printf '[%s] %s%s\n' "$1" "${p:+[$p] }" "$2"; WOKE=1
+}
 
 watch_scan_lines() { # <id> <from-offset> <to-offset>
   local id="$1" from="$2" to="$3" line kind f pos n
@@ -1128,12 +1171,15 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           waiting, decision, blocked, done, failed)
   chartroom status [--json] [--all]       fleet view, derived from disk + live backends
   chartroom board [--json] [--no-color]   the dashboard's lanes in the terminal, one line per
-                                          item: short id, title, state, last event
+                                          item: short id, [project], title, state, last event
   chartroom resolve <id> [--json]         a full or short id (as the dashboard shows it) -> the
                                           task id, or the inbox item (i-xxxx); fails if unknown
                                           or ambiguous
-  chartroom inbox add <text>              add a dated "Waiting on the commander" item with a
-                                          stable id; prints the id
+  chartroom inbox add [--project P] <text>
+                                          add a dated "Waiting on the commander" item with a
+                                          stable id, labelled [P] (a name, or a repo path: its
+                                          directory name; "multi" for several); prints the id
+  chartroom inbox project <i-xxxx> <P>    label (or relabel) an open Waiting item with [P]
   chartroom inbox tag                     give every untagged Waiting item its id (idempotent)
   chartroom rule add --topic T [--supersedes r-x|-] [--src S] <text>
                                           record a lasting commander ruling in rulings.log
@@ -1151,7 +1197,8 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           backs the file up to records/, appends the rulings,
                                           removes the imported bullets and renders the block
   chartroom peek <id> [n]                 recent events and worker output
-  chartroom watch [--once [--timeout S]]  wake stream: one line per event that needs the XO
+  chartroom watch [--once [--timeout S]]  wake stream: one line per event that needs the XO,
+                                          "[<id>] [<project>] <event>"
   chartroom dashboard [--port N] [--open] [--daemon] [--no-gh] [--theme chartroom|hud]
                       [--host ADDR | --expose] [--no-token]
                                           read-only web view (127.0.0.1, default port 4517):

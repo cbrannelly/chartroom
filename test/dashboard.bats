@@ -628,7 +628,7 @@ EOF2
   want="$(cr dashboard --json | jq -r '.lanes[][] | .short_id // "-"' | tr '\n' ' ')"
   got="$(grep -E '^  [^ ]' <<<"$output" | grep -v '^  none$' | awk '{print $1}' | tr '\n' ' ')"
   [ "$got" = "$want" ]
-  grep -qE '^  21ba +Task fix-login-21ba  \[decision\]  decision: pick A or B \(recommend A\)$' <<<"$output"
+  grep -qE '^  21ba +\[todo-cli\] Task fix-login-21ba  \[decision\]  decision: pick A or B \(recommend A\)$' <<<"$output"
   grep -qE '^  i-7f3a +merge the parser PR\?  \[waiting on you \(inbox\)\]  since 2026-01-02$' <<<"$output"
   grep -qE '^  - +which region for staging\?' <<<"$output"   # an untagged inbox line has no id yet
   # color on request
@@ -638,4 +638,36 @@ EOF2
   [ "$(cr board --json | jq -c '[.counts, [.lanes[][] | .short_id]]')" = "$(cr dashboard --json | jq -c '[.counts, [.lanes[][] | .short_id]]')" ]
   run cr board --bogus
   [ "$status" -ne 0 ]
+}
+
+@test "projects: inbox cards carry their [project]; board and needs-you lead with it; JSON only adds" {
+  fixture fix-login-21ba subagent <<<"600 decision: pick A or B"
+  fixture api-9c1d subagent project=/srv/code/billing-api/ <<<"300 blocked: need staging credentials"
+  cat >"$CHARTROOM_HOME/inbox.md" <<'EOF2'
+# Inbox
+
+## Waiting on the commander
+- [i-7f3a] 2026-01-02 — [webapp] merge the parser PR?
+- [i-1b2c] 2026-01-03 — which region for staging?
+- [multi] untagged and undated
+
+## Approvals given in chat, not yet in a brief
+- 2026-01-04 — [billing] ok to rotate the test key
+EOF2
+  BOARD="$(cr dashboard --json)"
+  [ "$(card inbox-0 | jq -c '[.short_id, .project, .title, .date]')" = '["i-7f3a","webapp","merge the parser PR?","2026-01-02"]' ]
+  [ "$(card inbox-1 | jq -c '[.project, .title]')" = '[null,"which region for staging?"]' ]
+  [ "$(card inbox-2 | jq -c '[.short_id, .project, .title, .date]')" = '[null,"multi","untagged and undated",null]' ]
+  [ "$(card api-9c1d | jq -r .project)" = billing-api ]
+  [ "$(jq -c '.inbox.approvals[0] | [.project, .text, .date]' <<<"$BOARD")" = '["billing","ok to rotate the test key","2026-01-04"]' ]
+  # backward compatible: an inbox card has every key it had before, plus project
+  [ "$(card inbox-1 | jq -c 'keys - ["project"]')" = '["date","files","id","lane","last_at","prs","reason","short_id","state","title","type"]' ]
+  run cr board --no-color
+  grep -qE '^  21ba +\[todo-cli\] Task fix-login-21ba  \[decision\]' <<<"$output"
+  grep -qE '^  9c1d +\[billing-api\] Task api-9c1d  \[blocked\]  blocked: need staging credentials$' <<<"$output"
+  grep -qE '^  i-7f3a +\[webapp\] merge the parser PR\?  \[waiting on you \(inbox\)\]  since 2026-01-02$' <<<"$output"
+  grep -qE '^  i-1b2c +which region for staging\?  \[waiting on you' <<<"$output"   # no label, no brackets
+  grep -qE '^  - +\[multi\] untagged and undated' <<<"$output"
+  # the page puts the project above the title on needs-you cards
+  grep -q 'lane === "needs_you" && c.project' "$REPO_ROOT/lib/dashboard/index.html"
 }

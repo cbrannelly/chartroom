@@ -215,6 +215,9 @@ kill_tree() { # <pid>
 tdir() { printf '%s/tasks/%s' "$CR_HOME" "$1"; }
 need_task() { [[ -f "$(tdir "$1")/meta.json" ]] || die "no such task: $1"; }
 meta() { jq -r --arg k "$2" '.[$k] // empty | tostring' "$(tdir "$1")/meta.json"; }
+# The task's project as the commander knows it: the repo's directory name (status rows use
+# the same rule), or empty when the task has none.
+project_label() { local p; p="$(meta "$1" project 2>/dev/null || true)"; p="${p%/}"; printf '%s' "${p##*/}"; }
 meta_set() { # meta_set <id> <key> <string-value>
   local f; f="$(tdir "$1")/meta.json"
   jq --arg k "$2" --arg v "$3" '.[$k]=$v | .updated=(now|todate)' "$f" >"$f.tmp" && mv "$f.tmp" "$f"

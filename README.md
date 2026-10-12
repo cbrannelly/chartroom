@@ -231,13 +231,14 @@ header:
 
 | Lane | What lands there |
 |---|---|
-| **Needs you** | tasks in `decision`, `blocked`, `failed` or `awaiting-input` (in that order), then the "Waiting on ..." items in `inbox.md` with their question text |
+| **Needs you** | tasks in `decision`, `blocked`, `failed` or `awaiting-input` (in that order), then the "Waiting on ..." items in `inbox.md` with their question text; every card leads with its project |
 | **In progress** | `working` and `drafting` tasks, and `waiting` ones: a worker that ended its turn right after a `waiting` event, inside its window (the card shows what it waits on and until when) |
 | **On hold** | `stopped-silent` and `waiting-overdue` tasks; tasks whose last event (other than their own `waiting` event) says they wait on a person ("waiting on/for", "awaiting review", "pending approval", "on hold"); done tasks whose open PR still needs someone's review |
 | **Ready for you** | `done` tasks that are not closed: a PR to review or a report to read |
 | **Recently finished** | tasks closed in the last 48 hours (`CHARTROOM_DASHBOARD_RECENT_HOURS`), and done tasks whose PRs are all merged |
 
-Each card shows the title, project, age, the last worker event, PR/MR links found in
+Each card shows the title, project (above the title on a Needs you card, so you can tell which
+project a question is for at a glance), age, the last worker event, PR/MR links found in
 `events.log` and `report.md`, and links that open the task's brief, report, plan and event log
 as plain text. Approvals given in chat but not yet in a brief are listed under Needs you.
 
@@ -277,10 +278,19 @@ How it is built, and what it promises:
   `i-7f3a` tag. Clicking it copies `/continue <id>`; paste that into the XO session and the
   `continue` skill takes you straight to what the item needs from you.
   `chartroom resolve <id>` maps any short or full id back. `chartroom board` prints the same
-  lanes in the terminal (short id, title, state, last event; color only on a terminal,
-  `--json` for the lanes JSON). Inbox items get their tag from
-  `chartroom inbox add <text>` (or `chartroom inbox tag` for lines written by hand); it never
-  changes as other items come and go.
+  lanes in the terminal (short id, `[project]`, title, state, last event; color only on a
+  terminal, `--json` for the lanes JSON). Inbox items get their tag from
+  `chartroom inbox add [--project P] <text>` (or `chartroom inbox tag` for lines written by
+  hand); it never changes as other items come and go.
+- **Every question carries its project.** `chartroom inbox add --project webapp "which region?"`
+  writes `- [i-7f3a] 2026-01-02 — [webapp] which region?`; `--project` takes a name (`multi`
+  for a question that spans projects) or a repo path (its directory name). The board, the
+  dashboard, `resolve --json` and the lanes JSON (`project` on inbox items, `null` on a line
+  without a label) all show it. `chartroom inbox project i-7f3a webapp` labels an item that has
+  none. `status` puts the project right after the id, and every `watch` wake reads
+  `[<id>] [<project>] <event>`, so the XO relays a decision already labelled; the skills have
+  it lead every question it puts to you with `**[project]**` (and, in Claude Code, use the
+  project as the question's header).
 
 ### On the network: other devices
 

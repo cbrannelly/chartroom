@@ -224,6 +224,8 @@
          background: var(--chip); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
   .sid:hover, .sid:focus-visible { color: var(--ink); border-color: var(--accent); outline: none; }
   .sid.copied { color: var(--accent); border-color: var(--accent); }
+  .card .proj { font: 600 11px/1.4 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--accent);
+                margin: 0 0 3px; overflow-wrap: anywhere; }
   .card .sub { color: var(--muted); font-size: 12px; margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
   .badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--chip);
            color: var(--ink); border: 1px solid var(--line); white-space: nowrap; }
@@ -714,17 +716,16 @@ function shortId(c) {
 function card(c, lane) {
   const motion = motionOf(c, lane);
   const fresh = c.type === "task" && Date.now() - ms(c.last_at) < 120000;
+  // A card that needs the commander leads with its project, so the question is placed at a glance.
+  const lead = lane === "needs_you" && c.project;
   const sub = el("div", { class: "sub" });
-  if (c.type === "task") {
-    if (c.project) sub.append(el("span", { text: c.project }));
-    sub.append(el("span", { class: "badge accent", text: c.reason || c.state }));
-  } else {
-    sub.append(el("span", { class: "badge accent", text: "inbox" }));
-  }
+  if (c.project && !lead) sub.append(el("span", { text: c.project }));
+  sub.append(el("span", { class: "badge accent", text: c.type === "task" ? c.reason || c.state : "inbox" }));
   const node = el("article", { class: "card m-" + motion + (c.type === "inbox" ? " inbox" : "") + (fresh ? " fresh" : "") },
     el("div", { class: "gleam", "aria-hidden": "true" }),
     motion === "attn" ? el("div", { class: "glow", "aria-hidden": "true" }) : null,
     motion === "attn" ? el("div", { class: "brackets", "aria-hidden": "true" }) : null,
+    lead ? el("div", { class: "proj", text: c.project, title: "project" }) : null,
     el("div", { class: "head" }, signal(motion), el("div", { class: "title", text: c.title || c.id, title: c.id }), shortId(c)),
     sub, clockRow(c, motion));
   if (c.type === "task" && c.waiting_on) {
@@ -885,7 +886,7 @@ function render(d) {
     }
     if (k === "needs_you" && d.inbox && d.inbox.approvals && d.inbox.approvals.length) {
       foot.append(el("div", { class: "approvals", text: "Approvals given in chat, not yet in a brief:" },
-        el("ul", {}, ...d.inbox.approvals.map((a) => el("li", { text: (a.date ? a.date + " — " : "") + a.text })))));
+        el("ul", {}, ...d.inbox.approvals.map((a) => el("li", { text: (a.date ? a.date + " — " : "") + (a.project ? "[" + a.project + "] " : "") + a.text })))));
     }
   }
 

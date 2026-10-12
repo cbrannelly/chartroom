@@ -146,7 +146,8 @@ locally only if they said local. Once it has landed or the commander says to dro
 
 Don't poll, sleep, or peek on a timer. Wait on the wake stream: `chartroom watch` (a stream)
 or `chartroom watch --once --timeout <s>` (one batch of wakes, then exit; exit 124 = nothing
-happened). Your harness reference says which one to use. Every line is a wake:
+happened). Your harness reference says which one to use. Every line is a wake, as
+`[<id>] [<project>] <event>`; keep the project when you relay it:
 
 - `decision`, `blocked`, `done`, `failed`: the worker reported.
 - `exited`: a headless or command run ended without reporting first.
@@ -210,6 +211,15 @@ others read between steps. `close` only marks it closed; its directory is never 
   a risk, or a pending decision.
 - **Decisions, one at a time.** Order them by impact. Each one gets a recommendation and
   the options.
+- **Every question leads with its project.** Anything you put to the commander (a question,
+  a decision, an approval, a blocker) starts with the project in bold brackets:
+  `**[webapp]** merge the parser PR?`, or `**[webapp · 108a]**` when it belongs to a task and
+  the commander may need the short id for `/continue`. Use the project's name as `status`,
+  `board` and `watch` print it. A question that spans projects says `**[multi]**`; one about
+  the crew or chartroom itself says `**[chartroom]**`. With a structured question tool
+  (AskUserQuestion's `header` chip in Claude Code, 12 characters at most), the header is the
+  project name, shortened if needed, never a generic word like "Decision" or "Approval".
+  No exceptions, even when only one project is in flight.
 - **Rulings.** When the commander states a lasting preference, record it as a ruling:
   `chartroom rule add --topic <slug> "<text>"`, then confirm it in a line. The newest ruling in
   a topic wins and supersedes the one before it, so reuse the topic when a ruling changes an
@@ -219,9 +229,11 @@ others read between steps. `close` only marks it closed; its directory is never 
   generated block in `commander.md`; never edit that block by hand. `rule list --all` shows
   every ruling with its supersede chain when you need to know what changed and when.
 - **Inbox.** Chat does not survive compaction; `inbox.md` in the home does. When you ask the
-  commander a question you are waiting on, add it with `chartroom inbox add "<question>"`
-  (a dated line under "Waiting on the commander" with a stable short id the dashboard shows;
-  after hand-editing that section, run `chartroom inbox tag`). When the commander approves something in chat that is not yet written into a
+  commander a question you are waiting on, add it with
+  `chartroom inbox add --project <project> "<question>"` (a dated line under "Waiting on the
+  commander", labelled `[<project>]`, with a stable short id the dashboard shows; after
+  hand-editing that section, run `chartroom inbox tag`, and `chartroom inbox project <i-id>
+  <project>` labels an item that has none). When the commander approves something in chat that is not yet written into a
   task brief, add a dated line under "Approvals given in chat, not yet in a brief". Remove the
   line once it is answered or recorded in a brief.
 

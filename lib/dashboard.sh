@@ -53,9 +53,11 @@ win_cmdline() { # <windows pid>
   powershell.exe -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$1').CommandLine" 2>/dev/null || true
 }
 
-# Open inbox.md items as JSON: {waiting:[{short_id,date,text}], approvals:[...]}. Same rules
-# as inbox_line: bullets under "## Waiting ..." / "## Approvals ...", "(none)" excluded.
-# short_id is the item's "[i-xxxx]" tag (null when untagged), split off the text.
+# Open inbox.md items as JSON: {waiting:[{short_id,date,project,text}], approvals:[...]}. Same
+# rules as inbox_line: bullets under "## Waiting ..." / "## Approvals ...", "(none)" excluded.
+# short_id is the item's "[i-xxxx]" tag (null when untagged), split off the text; project is
+# the "[project]" label after the date (null on an unlabelled line), split off the same way:
+#   - [i-7f3a] 2026-01-02 — [webapp] which region for staging?
 dashboard_inbox() {
   local f="$CR_HOME/inbox.md"
   [[ -f "$f" ]] || { echo '{"waiting":[],"approvals":[]}'; return 0; }
@@ -67,7 +69,9 @@ dashboard_inbox() {
        | ([.text | capture("^\\[(?<id>i-[0-9a-f]{4,})\\] +(?<rest>.*)$")] | first) as $tag
        | if $tag then .short_id = $tag.id | .text = $tag.rest else .short_id = null end
        | . + (if (.text | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}"))
-              then {date: .text[0:10], text: (.text[10:] | sub("^[\\s—–:-]+"; ""))} else {date: null} end)]
+              then {date: .text[0:10], text: (.text[10:] | sub("^[\\s—–:-]+"; ""))} else {date: null} end)
+       | ([.text | capture("^\\[(?<p>[^\\]]+)\\] +(?<rest>.*)$")] | first) as $proj
+       | if $proj then .project = $proj.p | .text = $proj.rest else .project = null end]
       | {waiting: map(select(.section == "waiting") | del(.section)),
          approvals: map(select(.section == "approvals") | del(.section))}'
 }
@@ -302,8 +306,8 @@ cmd_dashboard() {
 }
 
 # `chartroom board`: the dashboard's lanes in the terminal, from the same dashboard_json, so
-# the two never disagree. One line per item: short id, title, state, a snippet of the last
-# event. Color only when stdout is a terminal (and NO_COLOR is unset); --json is the lanes JSON.
+# the two never disagree. One line per item: short id, [project], title, state, a snippet of
+# the last event (the project leads the text, so a question is placed at a glance). Color only when stdout is a terminal (and NO_COLOR is unset); --json is the lanes JSON.
 cmd_board() {
   local json=0 color=0 a
   [[ -t 1 && -z "${NO_COLOR:-}" ]] && color=1
@@ -329,7 +333,8 @@ cmd_board() {
     | ("\($name) (\($items | length))" | c($col)),
       (if ($items | length) == 0 then "  none" | c("2")
        else $items[]
-         | ((.short_id // "-") | pad($w) | c("1")) + "  " + ((.title // .id) | cut(60))
+         | ((.short_id // "-") | pad($w) | c("1")) + "  "
+           + (if (.project // "") != "" then ("[" + .project + "]" | c("1")) + " " else "" end) + ((.title // .id) | cut(60))
            + "  " + ("[" + (.reason // .state // "") + "]" | c("2"))
            + (if .type == "inbox" then (if .date then "  since " + .date else "" end)
               elif .waiting_on then "  waiting on: " + (.waiting_on | cut(60))

@@ -1,6 +1,6 @@
 # lanes.jq - classify status rows into dashboard lanes. Input: the array of task rows built
 # by dashboard_json (status_rows + dashboard_task_extra). Arguments:
-#   $inbox    {waiting:[{date,text}], approvals:[...]} from inbox.md
+#   $inbox    {waiting:[{short_id,date,project,text}], approvals:[...]} from inbox.md
 #   $prs      {url: {state, reviewDecision, isDraft}} (empty when gh is absent or disabled)
 #   $hours    how far back "Recently finished" reaches
 #   $home, $version
@@ -55,7 +55,7 @@ now as $now
         else .live end)
     | select(.lane != null))
 | . as $tasks
-| ($inbox.waiting | to_entries | map({type: "inbox", id: ("inbox-" + (.key | tostring)), short_id: (.value.short_id // null), title: .value.text,
+| ($inbox.waiting | to_entries | map({type: "inbox", id: ("inbox-" + (.key | tostring)), short_id: (.value.short_id // null), project: (.value.project // null), title: .value.text,
      date: .value.date, last_at: (if .value.date then .value.date + "T00:00:00Z" else null end),
      lane: "needs_you", state: "inbox", reason: "waiting on you (inbox)", prs: [], files: []})) as $waiting
 | def by_recent: sort_by(.last_at // "") | reverse;
