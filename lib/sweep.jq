@@ -29,8 +29,8 @@
 #            task: orphaned or its task closed -> apply. A second dashboard for this home
 #            (not the one .dashboard.pid tracks) -> apply; an untracked one -> human.
 #   daemon   in a closed task's worktree, or one that closes in this sweep -> apply; in a
-#            chartroom worktree dir that no longer exists -> apply, one that exists but no
-#            task records -> human; in a done/failed/stopped-silent task's worktree, running
+#            dir under this home's worktrees/ that no longer exists -> apply; in any other
+#            chartroom worktree dir no task of this home records -> human; in a done/failed/stopped-silent task's worktree, running
 #            >= $idle with the task idle >= $idle -> human. A process with a terminal is
 #            never apply (someone may be using it): human instead.
 
@@ -115,7 +115,10 @@ def wrapper: (.args | words) as $w | (($w[0] // "") | base) as $b
      | (first($TT[] | . as $t | select(any($t.dirs[]; . as $d | $p | session_for($d)) or ($p.pid == $t.pid and any($t.dirs[]; . as $d | $p | mentions($d)))) | $t.id) // null) as $s
      | (if $s then null else (first($TT[] | select(.wt != "") | . as $t | select(($p.cwd | under($t.wt)) or ($p | mentions($t.wt))) | .id) // null) end) as $w
      | if $s then {pid, task: $s, kind: "session"}
-       elif $w then {pid, task: $w, kind: (if ($p | agent) or $p.pid == $T[$w].pid then "session" else "dev" end)}
+       # An agent found only by its directory is the task's session when it has no terminal, or
+       # herdr has a pane there; with a terminal of its own it may be someone's own session.
+       elif $w then {pid, task: $w, kind: (if $p.pid == $T[$w].pid
+           or (($p | agent) and ($p.tty == "" or any($panes[]; .cwd | under($T[$w].wt)))) then "session" else "dev" end)}
        elif $p.root != "" then {pid, task: null, kind: "dev", root: $p.root, root_gone: $p.root_gone}
        else empty end]
    | map({key: (.pid | tostring), value: .}) | from_entries) as $direct
@@ -227,8 +230,10 @@ def wrapper: (.args | words) as $w | (($w[0] // "") | base) as $b
      .[0] as $g | ($T[$g.task // ""] // null) as $t
      | trees(.) as $tree | group_item($tree)
      + {class: "daemon", task: $g.task, state: ($t.state // null), project: ($t.project // null), worktree: ($t.wt // $g.root)}
+     | (any($homes[]; . as $h | $g.root | startswith($h + "/worktrees/"))) as $ours
      | . + (if $t == null then
-              (if $g.root_gone then {action: "apply", reason: "its worktree \($g.root) no longer exists"}
+              (if $g.root_gone and $ours then {action: "apply", reason: "its worktree \($g.root) no longer exists"}
+               elif $g.root_gone then {action: "human", reason: "runs in \($g.root), which no longer exists and no task of this home records (another home's?)"}
                else {action: "human", reason: "runs in a chartroom worktree no task records (\($g.root))"} end)
             elif ($t.state | finished | not) then {action: "keep"}
             elif $t.state == "closed" then {action: "apply", reason: "in the worktree of a closed task"}

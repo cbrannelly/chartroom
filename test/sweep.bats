@@ -52,6 +52,16 @@ finished_task() { # [cr new args...]
   printf '%s' "$id"
 }
 
+# A closed task record written by hand (no dispatch); <extra> is merged into its meta.json.
+closed_record() { # <id> [extra-json]
+  local t; t="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$CHARTROOM_HOME/tasks/$1" "$CHARTROOM_HOME/worktrees/proj/$1"
+  jq -n --arg id "$1" --arg p "$PROJECT" --arg wt "$(cd "$CHARTROOM_HOME/worktrees/proj/$1" && pwd -P)" --arg t "$t" --argjson x "${2:-{\}}" \
+    '{schema: 1, id: $id, title: $id, kind: "scout", backend: "command", project: $p, base: "main", worktree: $wt,
+      created: $t, updated: $t, dispatched: $t, closed: $t} + $x' >"$CHARTROOM_HOME/tasks/$1/meta.json"
+  printf '%s note: closed\n' "$t" >"$CHARTROOM_HOME/tasks/$1/events.log"
+}
+
 @test "sweep: an empty home has nothing to free, and a dry run writes nothing" {
   run cr sweep
   [ "$status" -eq 0 ]
@@ -223,9 +233,43 @@ finished_task() { # [cr new args...]
   json="$(sweep_json)"
   [[ "$(item_for "$json" "$ghost" | jq -r '.action + ": " + .reason')" == "apply: its worktree "*"/worktrees/proj/ghost no longer exists" ]]
   [[ "$(item_for "$json" "$stray" | jq -r '.action + ": " + .reason')" == "human: runs in a chartroom worktree no task records ("*"/worktrees/proj/stray)" ]]
+  # under a project's .worktrees/ (where another home may keep its worktrees) a missing dir is
+  # never enough: that is for a human
+  closed_record mine-1
+  mkdir -p "$PROJECT/.worktrees/chartroom_theirs"
+  theirs="$(spawn "$PROJECT/.worktrees/chartroom_theirs" bash "$TOOLS/vite")"
+  rm -rf "$PROJECT/.worktrees/chartroom_theirs"
+  [[ "$(item_for "$(sweep_json)" "$theirs" | jq -r '.action + ": " + .reason')" == "human: runs in "*"chartroom_theirs, which no longer exists and no task of this home records (another home's?)" ]]
   cr sweep --apply >/dev/null
   gone "$ghost"
-  alive "$stray"
+  alive "$stray"; alive "$theirs"
+}
+
+@test "sweep closes a closed task's herdr tab only where herdr has its agent, and a leftover pane only in its worktree" {
+  use_fake herdr
+  export FAKE_HERDR_DIR="$BATS_TEST_TMPDIR/herdr"; mkdir -p "$FAKE_HERDR_DIR/agents" "$FAKE_HERDR_DIR/panes"
+  closed_record ok-1 '{"backend": "herdr:claude", "herdr_tab": "w1:t1"}'
+  closed_record moved-2 '{"backend": "herdr:claude", "herdr_tab": "w1:t2"}'
+  closed_record pane-3 '{"backend": "herdr:claude", "herdr_tab": "w1:t3"}'
+  echo "w1:p1 w1:t1 idle" >"$FAKE_HERDR_DIR/agents/ok-1"    # its agent, in the recorded tab
+  echo "w1:p9 w1:t9 idle" >"$FAKE_HERDR_DIR/agents/moved-2" # its agent, in another tab
+  echo "w1:t5 $(meta_of pane-3 worktree)" >"$FAKE_HERDR_DIR/panes/w1_p5" # a pane left in its worktree
+  echo "w1:t6 $BATS_TEST_TMPDIR" >"$FAKE_HERDR_DIR/panes/w1_p6"         # someone else's pane
+  a="$(spawn "$BATS_TEST_TMPDIR" bash "$TOOLS/vite" --add-dir "$CHARTROOM_HOME/tasks/ok-1")"
+  b="$(spawn "$BATS_TEST_TMPDIR" bash "$TOOLS/vite" --add-dir "$CHARTROOM_HOME/tasks/moved-2")"
+  json="$(sweep_json)"
+  [ "$(jq -c '[.items[] | select(.class == "session") | [.task, .action, .herdr_tab, .herdr_panes]]' <<<"$json")" = \
+    '[["moved-2","apply",null,[]],["ok-1","apply","w1:t1",[]],["pane-3","apply",null,["w1:p5"]]]' ]
+  [ -f "$FAKE_HERDR_DIR/agents/ok-1" ] # a dry run closes nothing
+  run cr sweep --apply
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "sweep (applied): freed 3 session(s) = 4 proc(s), "* ]]
+  grep -qx 'tab close w1:t1' "$FAKE_HERDR_DIR/calls.log"
+  ! grep -qE 'tab close w1:t(2|9)|pane close w1:p6' "$FAKE_HERDR_DIR/calls.log"
+  [ ! -e "$FAKE_HERDR_DIR/panes/w1_p5" ]; [ -e "$FAKE_HERDR_DIR/panes/w1_p6" ]
+  gone "$a"; gone "$b"
+  events ok-1 | grep -q "note: sweep: closed its herdr tab w1:t1"
+  events pane-3 | grep -q "note: sweep: closed a leftover herdr pane w1:p5"
 }
 
 @test "sweep's default output stays short however busy the home is; --verbose and --json carry the detail" {

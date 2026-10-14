@@ -5,6 +5,7 @@
 #                  `agent start` return agent_not_ready with the name kept, as herdr does;
 #                  sending enter clears it.
 #   $S/agents/<n>  live agents, "<pane> <tab> <status>"; a leftover one makes start agent_name_taken.
+#   $S/panes/<p>   panes `pane list/get/close` know besides agents' (sweep), "<tab> <cwd>".
 # `agent prompt` simulates Claude's UserPromptSubmit hook for task $FAKE_HERDR_TASK.
 [[ -n "${FAKE_HERDR_DIR:-}" ]] || { echo "herdr: could not connect to server socket" >&2; exit 1; }
 S="$FAKE_HERDR_DIR"; mkdir -p "$S/agents"
@@ -46,6 +47,14 @@ case "$cmd" in
     trust_up && err agent_blocked "agent $1 is waiting at a dialog"
     [[ -n "${FAKE_HERDR_TASK:-}" ]] && jq -cn --arg p "$2" '{prompt:$p}' | "${CHARTROOM_BIN:?}" hook "$FAKE_HERDR_TASK" prompt-submit ;;
   "agent wait") : ;;
+  "pane list")
+    for f in "$S"/panes/*; do [[ -f "$f" ]] || continue; read -r tab cwd <"$f"
+      jq -cn --arg p "$(basename "$f" | tr _ :)" --arg t "$tab" --arg c "$cwd" '{pane_id: $p, tab_id: $t, cwd: $c}'; done |
+      jq -s '{result: {panes: .}}' ;;
+  "pane get")
+    f="$S/panes/${1//:/_}"; [[ -f "$f" ]] || err pane_not_found "pane $1 not found"; read -r tab cwd <"$f"
+    jq -cn --arg p "$1" --arg t "$tab" --arg c "$cwd" '{result: {pane: {pane_id: $p, tab_id: $t, cwd: $c}}}' ;;
+  "pane close") f="$S/panes/${1//:/_}"; [[ -f "$f" ]] || err pane_not_found "pane $1 not found"; rm -f "$f" ;;
   *) err unknown "unknown command $cmd" ;;
 esac
 exit 0
