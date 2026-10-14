@@ -14,7 +14,9 @@ never from conversation memory. (If `chartroom` is not on PATH, use
    chartroom status --json
    ```
    Also read `$CHARTROOM_HOME/inbox.md`: questions waiting on the commander and chat
-   approvals not yet in a brief.
+   approvals not yet in a brief. Run `chartroom sweep` (a dry run, a few lines): its
+   "needs a human" lines go under **Needs you**, and its summary line under **Trouble** only
+   if it found much to free (then offer `--apply`).
    For every task in `done`, `decision`, `blocked`, `failed`, `stopped-silent`,
    `waiting-overdue`, `awaiting-input` or `lost` state, read its `$CHARTROOM_HOME/tasks/<id>/report.md` if one
    exists, and the last few lines of `events.log`. Run `chartroom peek <id>` only when those

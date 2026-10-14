@@ -62,7 +62,7 @@ finished_task() { # [cr new args...]
   [ "$(jq -r '.applied, (.items | length), .summary.apply.processes, (.load | has("avg"))' <<<"$output" | tr '\n' ' ')" = "false 0 0 true " ]
   run cr sweep --bogus
   [ "$status" -ne 0 ]; [[ "$output" == *"usage: chartroom sweep"* ]]
-  [[ "$(cr help)" == *"chartroom sweep [--apply]"* ]]
+  [[ "$(cr help)" == *"chartroom sweep [--apply] [--verbose|--json]"* ]]
 }
 
 @test "sweep: a dev daemon in a closed task's worktree is found by its directory; only --apply kills it" {
@@ -137,6 +137,7 @@ finished_task() { # [cr new args...]
   echo wip >"$(meta_of "$dirty" worktree)/notes.txt"
   TASK_ENV="STUB_MODE=fail" failed="$(finished_task)"
   ses="$(spawn "$BATS_TEST_TMPDIR" bash "$TOOLS/vite" --add-dir "$CHARTROOM_HOME/tasks/$failed")"
+  dev="$(spawn "$(meta_of "$dirty" worktree)" bash "$TOOLS/vite" --port 5173)"
   # fresh: nothing is raised yet (the idle threshold, 24h by default)
   run cr sweep
   [[ "${lines[0]}" == *"needs a human: 0;"* ]]
@@ -144,12 +145,12 @@ finished_task() { # [cr new args...]
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "sweep (applied): freed nothing; needs a human: 3;"* ]]
   [[ "$output" == *"[$ship] done "*"not closeable: 1 commit(s) not in main (unpushed or unmerged)"* ]]
-  [[ "$output" == *"[$dirty] done "*"not closeable: uncommitted changes in its worktree (1 path(s))"* ]]
+  [[ "$output" == *"[$dirty] done "*"not closeable: uncommitted changes in its worktree (1 path(s)); running "*" in the worktree of a done task idle "*" (holds 2 proc(s), "* ]]
   [[ "$output" == *"[$failed] failed "*"ago; its session is still open (holds 2 proc(s), "* ]]
   [ -z "$(meta_of "$ship" closed)" ]; [ -z "$(meta_of "$dirty" closed)" ]
   [ -f "$(meta_of "$dirty" worktree)/notes.txt" ]
   [ -d "$(meta_of "$ship" worktree)" ]
-  alive "$ses"
+  alive "$ses"; alive "$dev"
   # merged into its base: landed, so it closes (the branch is kept, as close always does)
   git -C "$PROJECT" merge -q --ff-only "chartroom/$ship"
   run cr sweep --apply
@@ -194,20 +195,23 @@ finished_task() { # [cr new args...]
   alive "$a"; alive "$other"
 }
 
-@test "sweep stops a closed task's leftover session, and never treats a joined session's own directory as its worktree" {
+@test "sweep stops a closed task's leftover session; a joined session's directory and a mere mention of a task are never targets" {
   id="$(finished_task)"
   cr close "$id" >/dev/null
   ses="$(spawn "$BATS_TEST_TMPDIR" bash "$TOOLS/vite" --add-dir "$CHARTROOM_HOME/tasks/$id" --settings "$CHARTROOM_HOME/tasks/$id/claude-settings.json")"
   j="$(cd "$PROJECT" && CLAUDECODE=1 CLAUDE_PID=$$ CLAUDE_CODE_SESSION_ID=sess-x cr join --agent claude --title joined | sed -n 's/^id=//p')"
   cr close "$j" >/dev/null
   mine="$(spawn "$PROJECT" bash "$TOOLS/vite")"
+  # naming the task's directory is not enough to be its session (a pager on its report)
+  pager="$(spawn "$BATS_TEST_TMPDIR" bash "$TOOLS/vite" "$CHARTROOM_HOME/tasks/$id/report.md")"
   json="$(sweep_json --idle-hours 0)"
   [ "$(item_for "$json" "$ses" | jq -r '.class + " " + .action + " " + .task')" = "session apply $id" ]
   [ -z "$(item_for "$json" "$mine")" ]
+  [ -z "$(item_for "$json" "$pager")" ]
   run cr sweep --apply --idle-hours 0
   [[ "${lines[0]}" == "sweep (applied): freed 1 session(s) = 2 proc(s), "* ]]
   gone "$ses"
-  alive "$mine"
+  alive "$mine"; alive "$pager"
   events "$id" | grep -q "note: sweep: stopped "
 }
 

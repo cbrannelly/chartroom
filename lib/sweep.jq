@@ -18,7 +18,8 @@
 #
 # The rules:
 #   in-flight tasks (anything but done, failed, stopped-silent, closed): never touched.
-#   session  closed task -> apply (a leftover herdr pane in its worktree too). done task that closes in this sweep -> apply. A joined
+#   session  (the agent chartroom started, its launcher and pane shell, and what runs under it)
+#            closed task -> apply (a leftover herdr pane in its worktree too). done task that closes in this sweep -> apply. A joined
 #            session (the commander's own) -> human. done (not closeable), failed,
 #            stopped-silent, idle >= $idle -> human. Otherwise kept.
 #   close    done, clean, nothing unlanded, settled -> apply. Not closeable and idle >= $idle,
@@ -68,6 +69,11 @@ def pname:
 
 def agent: (.args | words | .[0] // "" | base) as $b
   | IN($b; "claude", "codex") or (IN($b; "node", "bun") and (.args | test("/(claude|codex)(\\.js)?( |$)")));
+# Is this process the session chartroom started for the task in <dir>? An agent naming the
+# directory (claude --add-dir/--settings, codex -o/--add-dir), the session launcher, or a wrapper
+# passing the agent its --add-dir. Anything else that merely names it (a pager or editor on its
+# report, a tail -f of its events) is not.
+def session_for($d): mentions($d) and (agent or ((.args + " ") | contains($d + "/launch.sh ") or contains("--add-dir " + $d + " ")));
 # A wrapper that is not "the session": `sh -c ...` shells, nohup, timeout, env.
 def wrapper: (.args | words) as $w | (($w[0] // "") | base) as $b
   | IN($b; "nohup", "timeout", "env", "caffeinate") or (IN($b; "sh", "bash", "zsh", "dash", "ksh", "fish") and any($w[]; . == "-c"));
@@ -100,14 +106,13 @@ def wrapper: (.args | words) as $w | (($w[0] // "") | base) as $b
 | ([$P[] | . as $p | ($p | loop) as $l | select($l != null) | $p + {loop: $l}]) as $loops
 | ([$loops[].pid]) as $loop_pids
 
-# Direct attribution: the task directory in argv (the agent session: claude --add-dir/--settings,
-# launch.sh, codex -o/notify), else the task's worktree as cwd or in argv, else a chartroom
-# worktree dir no task records.
+# Direct attribution: the task's session (session_for, or the pid recorded for the task), else
+# the task's worktree as cwd or in argv, else a chartroom worktree dir no task records.
 | ([$tasks[] | select((.dirs | length) > 0)]) as $TT
 | ([$P[] | select(.pid as $x | any($loop_pids[]; . == $x) | not)
      | select(((.args + " " + .cwd) | contains("/tasks/") or contains("worktrees")))
      | . as $p
-     | (first($TT[] | select(any(.dirs[]; . as $d | $p | mentions($d))) | .id) // null) as $s
+     | (first($TT[] | . as $t | select(any($t.dirs[]; . as $d | $p | session_for($d)) or ($p.pid == $t.pid and any($t.dirs[]; . as $d | $p | mentions($d)))) | $t.id) // null) as $s
      | (if $s then null else (first($TT[] | select(.wt != "") | . as $t | select(($p.cwd | under($t.wt)) or ($p | mentions($t.wt))) | .id) // null) end) as $w
      | if $s then {pid, task: $s, kind: "session"}
        elif $w then {pid, task: $w, kind: (if ($p | agent) or $p.pid == $T[$w].pid then "session" else "dev" end)}
@@ -228,7 +233,7 @@ def wrapper: (.args | words) as $w | (($w[0] // "") | base) as $b
             elif ($t.state | finished | not) then {action: "keep"}
             elif $t.state == "closed" then {action: "apply", reason: "in the worktree of a closed task"}
             elif closing($t) then {action: "apply", reason: "in the worktree of a task that closes in this sweep"}
-            elif .age_s >= $idle and stale($t) then {action: "human", reason: "running \(.age | dur) in the worktree of a \($t.state) task idle \($t.idle | dur)"}
+            elif .age_s >= $idle and stale($t) then {action: "human", reason: "running \(.age_s | dur) in the worktree of a \($t.state) task idle \($t.idle | dur)"}
             else {action: "keep"} end)
      | if .action == "apply" and .tty != "" then .action = "human" | .reason = "attached to a terminal (\(.tty)), so someone may be using it; " + .reason else . end)) as $daemons
 

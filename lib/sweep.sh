@@ -4,8 +4,9 @@
 #
 # It looks at this user's processes (ps, plus each one's working directory) against the
 # home's task records, and sorts what it finds into four classes:
-#   session  a task's agent process tree (its argv names the task's directory, or it is the
-#            agent running in the task's worktree), with its descendants
+#   session  the agent chartroom started for a task (it, its launcher or wrapper passes the
+#            agent the task's directory; or it is the agent in the task's worktree), the pane
+#            shell it runs in, and everything under it
 #   close    a done task: closeable when its worktree is clean and nothing on it is unlanded
 #   orphan   a chartroom loop left behind: `watch`/`listen` whose session is gone (its nearest
 #            real parent is init), a listener of a closed task, a second dashboard for the home
@@ -193,7 +194,7 @@ sweep_tasks_json() {
   fi
   local herdr_get='{}' close='{}' r
   while IFS=$'\t' read -r id st live runner; do
-    if [[ "$runner" == herdr && "$herdr" == null ]]; then
+    if [[ "$runner" == herdr && "$herdr" == null && -n "$(bin_of herdr)" ]]; then
       r="$(herdr agent get "$id" 2>/dev/null | jq -c '.result.agent | {tab: .tab_id, status: .agent_status}' 2>/dev/null || true)"
       [[ -n "$r" ]] && herdr_get="$(jq -c --arg id "$id" --argjson r "$r" '.[$id] = $r' <<<"$herdr_get")"
     fi

@@ -10,8 +10,9 @@ You don't juggle tabs.
 chartroom has two parts: a small bash CLI (`chartroom`) that does the exact work (task
 records, worktrees, launching, steering, liveness, a wake stream), and Agent Skills
 (`chartroom`, `bearings`, `dashboard` to open the board, `continue` to jump to one item by its
-short id, `captain`, the chartroom skill under its older name, and `join`, which lets an
-agent session you started yourself join the crew) that tell your agent how to be the XO. State is plain files under `~/.chartroom`. There is no daemon (an optional local
+short id, `captain`, the chartroom skill under its older name, `join`, which lets an
+agent session you started yourself join the crew, and `sweep`, which frees what finished work
+left running) that tell your agent how to be the XO. State is plain files under `~/.chartroom`. There is no daemon (an optional local
 dashboard can show the fleet in a browser).
 
 ```
@@ -381,6 +382,63 @@ Type the trailing slash (`chartroom/`) or the scheme, or the browser may search 
 Undo by reversing each step: remove the hosts line, the LaunchDaemons and the alias
 (`sudo ifconfig lo0 -alias 127.0.0.2`), and `caddy untrust`.
 
+## Housekeeping: sweep
+
+Finished work leaves things running: the agent sessions of done tasks, a `chartroom watch` whose
+XO session ended, dev servers and daemons (Nx, `tsc --watch`, vite, esbuild, rails, ...) started
+in a worktree that has since been closed. `chartroom sweep` finds them and frees the part that is
+safe to free:
+
+```bash
+chartroom sweep              # dry run: one summary line, then what needs a human
+chartroom sweep --apply      # free the safe set; prints the same summary of what it did
+chartroom sweep --verbose    # the safe set item by item: processes, age, CPU time, %CPU, RSS
+chartroom sweep --json       # everything, for tools
+```
+
+```
+sweep (dry run): safe to free 1 done task(s) to close, 4 session(s), 2 dev process tree(s) = 18 proc(s), 1.1G RSS, 0.2% CPU; needs a human: 1; left alone: 30 proc(s) of live work; load 2.88 2.86 3.06 on 18 CPUs
+  [remove-creds-1670] done 2d3h ago, not closeable: 5 commit(s) not in origin/main (unpushed or unmerged) (holds 2 proc(s), 420M)
+```
+
+What it looks at: this user's processes (`ps`, plus each one's working directory from `/proc` or
+`lsof`) against the home's task records. A process belongs to a task when its argv names the
+task's directory (the agent session: `claude --add-dir`, a launcher, `codex -o`), or when it runs
+in the task's worktree (by working directory or argv, whatever the program is), or descends from
+either. herdr's agent and pane lists add the sessions it hosts. All the rules live in
+`lib/sweep.jq`, in one place; the agent running it never has to reason over process lists.
+
+`--apply` acts only on the safe set:
+
+- closes done tasks whose worktree is clean and whose commits are all in the base ref (as of the
+  last fetch: it never fetches), through `chartroom close`, which still refuses a dirty worktree.
+  A task that reported done less than `CHARTROOM_SWEEP_SETTLE_MINUTES` ago waits, so the XO sees
+  its report first;
+- stops the sessions of closed tasks (a herdr tab or pane only when herdr places it in the task's
+  own tab or worktree; otherwise the processes);
+- kills orphaned chartroom loops: a `watch` run from this home whose session is gone (its nearest
+  real parent is init), a `listen` of a closed task, a second dashboard for the home;
+- kills processes left in a closed task's worktree, or in a chartroom worktree path that no
+  longer exists.
+
+Kills are TERM, then KILL after 5 seconds, and only if the pid still runs what the plan saw. Every
+act is logged to `sweep.log` in the home and, when it belongs to a task, to its `events.log`.
+
+It never touches in-flight work (anything but done, failed, stopped-silent or closed), never
+`--discard`s, never closes a task with uncommitted, unpushed or unmerged work, never treats a
+joined session's own directory as a worktree, and never kills a process with a terminal outside
+a task's session (someone may be using it). Whatever it is not sure about is listed under "needs
+a human" with the reason: a done task that has not landed, a failed or silently stopped task whose
+session is still open, a long-running process in an open task's worktree, an orphaned loop from
+another home. Those are raised only once the task has been idle for `--idle-hours`
+(`CHARTROOM_SWEEP_IDLE_HOURS`, default 24), so fresh work is not nagged about.
+
+The `sweep` skill has the XO run `chartroom sweep --apply` at session start, when the fleet goes
+quiet, and when you say the machine is hot or slow; it relays the summary line and asks you only
+about what needs a human. There is no daemon: a harness that can schedule (Claude Code's `/loop`,
+cron) can run `chartroom sweep --apply` now and then. Not on Git Bash (its `ps` has no working
+directories or argv); WSL2 works.
+
 ## Concepts
 
 - **Commander / XO / crew.** You, the coordinating agent, the workers. The crew never talks to you
@@ -451,6 +509,7 @@ $CHARTROOM_HOME/                    default ~/.chartroom
   tasks/<id>/events.log             one line per event
   .dashboard.pid  .dashboard.log    only while `chartroom dashboard --daemon` runs
   .dashboard.token                  the dashboard's access token (0600), once it has been on the network
+  sweep.log                         what `chartroom sweep --apply` closed, stopped and killed, one line each
   worktrees/<repo>/<id>/            task worktrees (unless the repo ignores .worktrees/)
 ```
 
@@ -522,6 +581,8 @@ Environment variables win. Otherwise chartroom reads `~/.config/chartroom/config
 | `CHARTROOM_HERDR_ANY_OS` | *(unset)* | `1` offers herdr on Git Bash, where its Windows preview is unverified |
 | `CHARTROOM_WAITING_GRACE_MINUTES` | `15` | a `waiting` worker turns `waiting-overdue` this long after its until-time |
 | `CHARTROOM_WAITING_MAX_MINUTES` | `120` | ... or this long after the event, when it names no until-time |
+| `CHARTROOM_SWEEP_IDLE_HOURS` | `24` | `sweep` raises a finished-but-open task's leftovers (and its own long-running processes) only after this long idle (`--idle-hours` overrides) |
+| `CHARTROOM_SWEEP_SETTLE_MINUTES` | `60` | `sweep --apply` closes a done task only this long after its `done` report, so the XO sees it first |
 | `CHARTROOM_BASH_SEARCH` | see Install | environment only: colon-separated dirs searched for a bash ≥ 4 when started under an older one (PATH is always searched first) |
 | `CHARTROOM_PATH_APPEND` | `/opt/homebrew/bin:/usr/local/bin` on macOS, else empty | environment only: dirs appended to PATH when they exist and are missing; empty turns it off |
 

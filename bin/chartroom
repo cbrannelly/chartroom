@@ -1219,17 +1219,18 @@ chartroom - run a crew of coding agents from one agent session (the XO)
   chartroom close <id> [--discard]        remove a clean worktree, close its tab, mark closed
                                           (a joined task's directory is never touched)
                                           (--discard only on the commander's explicit word)
-  chartroom sweep [--apply] [--json] [--idle-hours N]
+  chartroom sweep [--apply] [--verbose|--json] [--idle-hours N]
                                           audit what the crew left running: sessions of
                                           finished tasks, done tasks safe to close, orphaned
                                           watch/listen/dashboard loops, dev servers and daemons
-                                          in closed or missing worktrees; with age, CPU, RSS and
-                                          load. A dry run by default. --apply acts only on the
-                                          safe set (closes done tasks that are clean with
-                                          nothing unlanded, stops closed tasks' sessions, kills
-                                          orphans and those daemons) and logs to sweep.log;
-                                          never in-flight work, never --discard. The rest is
-                                          listed under "needs a human" with the reason
+                                          in closed or missing worktrees. A dry run by default;
+                                          prints one summary line (counts, RSS, CPU, load) and
+                                          one line per item that needs a human (--verbose: each
+                                          item's age, CPU, RSS). --apply frees only the safe set
+                                          (closes done tasks that are clean with nothing
+                                          unlanded, stops closed tasks' sessions, kills orphans
+                                          and those daemons), logs it to sweep.log; never
+                                          in-flight work, never --discard
   chartroom install-skills [--claude|--agents|--pi|--all|--dir D] [--uninstall] [--dry-run]
   chartroom version
 EOF

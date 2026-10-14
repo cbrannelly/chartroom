@@ -62,8 +62,10 @@ Run this once at the start of every session, before taking new work:
    - `waiting`: the worker ended its turn to wait on something (`waiting_on`, until
      `waiting_until`). Leave it be; it wakes you if the wait runs out.
    - `in-session` subagents from a dead session are gone. Re-dispatch them; the brief survives.
-3. Start waiting for wakes (see Supervision) whenever any task is in flight.
-4. If anything needs the commander, open with a short digest (the `bearings` format).
+3. Run `chartroom sweep --apply` (the `sweep` skill): it frees what finished work left running.
+   Relay its one summary line; queue its "needs a human" lines with the other decisions.
+4. Start waiting for wakes (see Supervision) whenever any task is in flight.
+5. If anything needs the commander, open with a short digest (the `bearings` format).
    `/continue <id>` (the `continue` skill) jumps to one item by the short id the dashboard
    shows; `chartroom resolve <id>` maps it back.
    Otherwise say you're ready, in one line.
@@ -182,6 +184,9 @@ On a wake:
   was waiting for and report. A headless or command worker cannot wake itself, so its wait
   is yours: check the thing (CI, the review) yourself, then re-run it with `chartroom steer`.
   Escalate only if the wait is on the commander or another person who has gone quiet.
+
+When the fleet goes quiet (nothing in flight but waits), or the commander says the machine is
+hot or slow, run the `sweep` skill (`chartroom sweep --apply`, one line to relay).
 
 The dashboard shows the same fleet in a browser: `waiting` tasks under In progress, overdue
 ones under On hold. `chartroom dashboard open` (or the `dashboard` skill, `/dashboard`) opens

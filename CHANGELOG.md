@@ -7,6 +7,25 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
+- `chartroom sweep`, and a `sweep` skill (linked by `install-skills`): an audit of what the crew
+  left running, and with `--apply` freeing the safe part of it. It finds sessions of finished
+  tasks, done tasks safe to close (worktree clean, every commit in the base ref), orphaned
+  `watch`/`listen` loops and second dashboards, and dev servers, watchers and daemons running from
+  a closed task's worktree or a chartroom worktree path that no longer exists (by working
+  directory and argv, whatever the program), with age, CPU time, %CPU, RSS and machine load.
+  A dry run by default. `--apply` closes through `chartroom close`, stops closed tasks' sessions
+  (a herdr tab or pane only when herdr places it in the task's own tab or worktree), kills the
+  rest (TERM, then KILL after 5s, only if the pid still runs what was planned), and logs each act
+  to `sweep.log` and the task's events. It never touches in-flight work, never `--discard`s,
+  never closes uncommitted, unpushed or unmerged work, and never treats a joined session's
+  directory as a worktree; anything else is listed under "needs a human" with the reason, once
+  the task has been idle `--idle-hours` (default 24). The default output is one summary line
+  plus one short line per item that needs a human (at most 10), so an agent spends few tokens
+  on it; `--verbose` lists the safe set item by item, `--json` has everything. All detection
+  and rules are code (`lib/sweep.sh`, `lib/sweep.jq`). The chartroom skill runs it at session
+  start and when the fleet goes quiet; bearings folds its needs-a-human items into "Needs you".
+  macOS and Linux (POSIX `ps` columns; `/proc` or `lsof` for working directories); not on Git
+  Bash. New config: `CHARTROOM_SWEEP_IDLE_HOURS` (24), `CHARTROOM_SWEEP_SETTLE_MINUTES` (60).
 - `mods/crew-view`, a Claude Code mod: the crew live in the XO's session, as a one-line band
   above the prompt with one emoji per lane and each needs-you item's project
   (`⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · 💤 1 · ✅ 1 · ❌ 1`, emoji counted as two
