@@ -16,6 +16,7 @@ setup() {
 }
 teardown() {
   local p
+  [[ -n "${SPAWNED:-}" && -f "$SPAWNED" ]] || return 0 # setup skipped (Git Bash)
   while read -r p; do
     [[ -n "$p" ]] || continue
     pkill -KILL -P "$p" 2>/dev/null || true; kill -KILL "$p" 2>/dev/null || true
