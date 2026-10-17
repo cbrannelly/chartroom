@@ -206,3 +206,35 @@ fake_clip() { # <name>: a clipboard tool that keeps its input in $CLIP and logs 
   cr artifact done "$b" >/dev/null
   [ -z "$(cr board --no-color | grep '^artifacts:' || true)" ]
 }
+
+@test "a worker's own files in a task's artifacts/ are never listed, counted or overwritten" {
+  local id sid d; id="$(new_task)"; sid="${id: -4}"; d="$CHARTROOM_HOME/tasks/$id/artifacts"
+  # what a worker may keep there itself: JSON of any shape, broken JSON, a .md/.json pair
+  mkdir -p "$d"
+  echo '[{"case": 1}, {"case": 2}]' >"$d/inputs.json"
+  echo '{"not json' >"$d/broken.json"
+  echo 'per-case notes' >"$d/per-case.txt"
+  echo '# worker summary' >"$d/summary.md"; echo '{"cases": 2}' >"$d/summary.json"
+  echo '# no sidecar' >"$d/report.md"
+  run cr status
+  [ "$status" -eq 0 ]; [[ "$output" != *"artifacts:"* ]]
+  run cr dashboard --json
+  [ "$status" -eq 0 ]
+  [ "$(jq -c --arg id "$id" '[.artifacts.open, (.lanes[][] | select(.id == $id) | .artifacts)]' <<<"$output")" = '[0,[]]' ]
+  [ "$(cr artifact list)" = "no open artifacts" ]
+  [ "$(cr artifact list --all --json)" = "[]" ]
+  # an artifact beside them is listed alone
+  [ "$(cr artifact add "$id" --kind note --title "Ours" - <<<"ours")" = "$sid/ours" ]
+  [ "$(cr artifact list --json | jq -c 'map(.ref)')" = "[\"$sid/ours\"]" ]
+  [ "$(cr board --no-color | tail -1)" = "artifacts: 1 open (1 note): chartroom artifact list" ]
+  # a slug that names a worker's file is refused, and the file is untouched
+  for s in summary report inputs; do
+    run cr artifact add "$id" --kind note --title "$s" - <<<"would clobber"
+    [ "$status" -ne 0 ]; [[ "$output" == *"is not a chartroom artifact"* ]]
+  done
+  [ "$(cat "$d/summary.md")" = "# worker summary" ]; [ "$(cat "$d/summary.json")" = '{"cases": 2}' ]
+  [ "$(cat "$d/report.md")" = "# no sidecar" ]; [ ! -e "$d/report.json" ]
+  [ "$(cat "$d/inputs.json")" = '[{"case": 1}, {"case": 2}]' ]; [ ! -e "$d/inputs.md" ]
+  run cr artifact show "$id/summary"
+  [ "$status" -ne 0 ]; [[ "$output" == *"no artifact 'summary'"* ]]
+}

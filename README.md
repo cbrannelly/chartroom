@@ -416,7 +416,9 @@ chartroom artifact done 21ba/reply-to-the-review   # sent: it stops showing as o
 - **On disk.** The text is `tasks/<id>/artifacts/<slug>.md`, verbatim, beside a small
   `<slug>.json` (title, kind, project, created, updated, done). An inbox item's artifacts live
   in `inbox/<i-xxxx>/artifacts/`, so they outlive its line in `inbox.md`; `add` needs the item
-  to be open, the other commands do not. A task's events log notes each add and done.
+  to be open, the other commands do not. A task's events log notes each add and done. A worker
+  may keep files of its own in `artifacts/`: only a sidecar `add` wrote, with its text beside
+  it, counts, and `add` refuses a slug that names someone else's file.
 
 The chartroom skill has the XO save anything it drafts for you to send or run as an artifact
 before showing it, and give you the ref, never the text in chat alone.

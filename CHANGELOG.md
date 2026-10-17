@@ -11,7 +11,8 @@ are stable from 0.1.0.
   --title T <file|->` keeps text the XO drafted for the commander (a message to send, commands to
   run, a note) with a task (`tasks/<id>/artifacts/<slug>.md`, plus a `.json` with title, kind,
   project, created, updated, done) or an open inbox item (`inbox/<i-xxxx>/artifacts/`, which
-  outlives the item's line). Refs are `<id>/<slug>` with the dashboard's short id or inbox tag
+  outlives the item's line; anything else a worker keeps in `artifacts/` is never listed or
+  overwritten). Refs are `<id>/<slug>` with the dashboard's short id or inbox tag
   (the id alone when it has one open artifact); adding the same slug again overwrites. `artifact
   list [<id>] [--all] [--json]`, `show <ref> [--path]`, `copy <ref>` (`CHARTROOM_CLIPBOARD`, else
   `pbcopy`, `wl-copy`, `xclip`, `xsel`, else it prints) and `done <ref>`. Dashboard cards (task and

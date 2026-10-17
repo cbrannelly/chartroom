@@ -11,9 +11,16 @@
 # inbox tag): 21ba/reply-to-review, i-7f3a/release-checklist. A bare owner works when it has
 # exactly one open artifact. Adding the same slug again overwrites the text and opens it
 # again; `done` (sent, or run) stops it showing as open. There are no versions.
+#
+# A task's artifacts/ may also hold a worker's own files. Only a sidecar in the shape `add`
+# writes, with its text beside it, is an artifact; anything else there is left alone: never
+# listed, never overwritten.
 
 ARTIFACT_KINDS='message|runbook|note'
 # {open, message, runbook, note}: open artifacts counted by kind (status, board, lanes JSON).
+# Is this sidecar one `add` wrote?
+ARTIFACT_SHAPE_JQ='type == "object" and (.schema | type) == "number" and (.title | type) == "string"
+  and (.kind == "message" or .kind == "runbook" or .kind == "note")'
 ARTIFACT_COUNTS_JQ='{open: length} + ([("message", "runbook", "note") as $k | {($k): map(select(.kind == $k)) | length}] | add)'
 
 artifact_dir() { # <task|inbox> <owner>
@@ -42,11 +49,15 @@ artifact_owner() { # <id> [--open]
   die "${out#chartroom: }"
 }
 
+# Is <slug>.json (with its <slug>.md) an artifact `add` wrote, not a worker's own file?
+artifact_ours() { [[ -f "${1%.json}.md" ]] && jq -e "$ARTIFACT_SHAPE_JQ" "$1" >/dev/null 2>&1; } # <sidecar>
+
 # Artifacts as a JSON array, newest first: {ref, owner_type, owner, slug, title, kind, project,
 # created, updated, done, path}. The owner comes from where the files are; ref uses the owner's
-# current short id.
+# current short id. Files that are not artifacts (see the top) are skipped, one by one, so a
+# stray or unreadable file never takes status, board or the dashboard down with it.
 artifacts_json() { # [--open] [--owner task|inbox <id>]
-  local open=0 t="" o="" files=()
+  local open=0 t="" o="" files=() f od
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --open) open=1; shift ;;
@@ -58,15 +69,18 @@ artifacts_json() { # [--open] [--owner task|inbox <id>]
   if [[ -n "$t" ]]; then files=("$(artifact_dir "$t" "$o")"/*.json)
   else files=("$CR_HOME"/tasks/*/artifacts/*.json "$CR_HOME"/inbox/*/artifacts/*.json); fi
   [[ ${#files[@]} -gt 0 ]] || { echo '[]'; return 0; }
-  jq -n -c --argjson shorts "$(short_ids_json)" --arg home "$CR_HOME" --argjson open "$open" '
-    [inputs | . as $m | (input_filename | split("/")) as $p
-     | {owner_type: (if $p[-4] == "tasks" then "task" else "inbox" end), owner: $p[-3], slug: ($p[-1] | rtrimstr(".json"))}
-     | {ref: ((if .owner_type == "task" then ($shorts[.owner] // .owner) else .owner end) + "/" + .slug)} + .
-       + {title: ($m.title // .slug), kind: ($m.kind // "note"), project: ($m.project // null), created: ($m.created // null),
-          updated: ($m.updated // $m.created // null), done: (if ($m.done // "") == "" then null else $m.done end),
-          path: "\($home)/\(if .owner_type == "task" then "tasks" else "inbox" end)/\(.owner)/artifacts/\(.slug).md"}
-     | select($open == 0 or .done == null)]
-    | sort_by(.updated // "") | reverse' "${files[@]}"
+  for f in "${files[@]}"; do
+    [[ -f "${f%.json}.md" ]] || continue
+    od="${f%/artifacts/*}"
+    jq -c --arg type "$([[ "$(basename "$(dirname "$od")")" == tasks ]] && echo task || echo inbox)" --arg owner "${od##*/}" \
+      --arg slug "$(basename "$f" .json)" --arg path "${f%.json}.md" "select($ARTIFACT_SHAPE_JQ)"' as $m
+      | {owner_type: $type, owner: $owner, slug: $slug, title: $m.title, kind: $m.kind, project: ($m.project // null),
+         created: ($m.created // null), updated: ($m.updated // $m.created // null),
+         done: (if ($m.done // "") == "" then null else $m.done end), path: $path}' "$f" 2>/dev/null || true
+  done | jq -s -c --argjson shorts "$(short_ids_json)" --argjson open "$open" '
+    map({ref: ((if .owner_type == "task" then ($shorts[.owner] // .owner) else .owner end) + "/" + .slug)} + .
+        | select($open == 0 or .done == null))
+    | sort_by(.updated // "") | reverse'
 }
 
 # One line counting open artifacts by kind, from ARTIFACT_COUNTS_JQ's object (default: computed
@@ -140,6 +154,9 @@ artifact_add() { # <task-or-inbox-id> --kind K --title T [--slug S] <file|->
   if [[ "$type" == task ]]; then project="$(project_label "$owner")"
   else project="$(dashboard_inbox | jq -r --arg t "$owner" '.waiting[] | select(.short_id == $t) | .project // empty' | head -1)"; fi
   d="$(artifact_dir "$type" "$owner")"; f="$d/$slug.md"; m="$d/$slug.json"
+  if [[ -e "$f" || -e "$m" ]] && ! artifact_ours "$m"; then
+    die "$d/$slug.md or .json is there and is not a chartroom artifact (a worker's own file?); pick another --slug"
+  fi
   mkdir -p "$d"
   if [[ "$src" == - ]]; then cat >"$f.tmp"; else cat -- "$src" >"$f.tmp"; fi
   [[ -s "$f.tmp" ]] || { rm -f "$f.tmp"; die "nothing to save: the text is empty"; }
