@@ -63,6 +63,8 @@ source "$CR_ROOT/lib/agents.sh"
 source "$CR_ROOT/lib/session.sh"
 # shellcheck source=../lib/dashboard.sh
 source "$CR_ROOT/lib/dashboard.sh"
+# shellcheck source=../lib/show.sh
+source "$CR_ROOT/lib/show.sh"
 # shellcheck source=../lib/rulings.sh
 source "$CR_ROOT/lib/rulings.sh"
 # shellcheck source=../lib/sweep.sh
@@ -615,14 +617,16 @@ state_of() { # derived from the last wake-worthy event; a restart re-derives the
 # describe the open `waiting` event whatever the state, and are null without one.
 # short_id is the task's short id (short_ids_json), which `resolve` maps back.
 status_rows() { # [--all] [--id ID]
-  local all=0 only="" id st d live lastline wait shorts
+  local all=0 only="" id st d dirs live lastline wait shorts
   while [[ $# -gt 0 ]]; do
     case "$1" in --all) all=1; shift ;; --id) only="$2"; all=1; shift 2 ;; *) shift ;; esac
   done
   shorts="$(short_ids_json)"
   shopt -s nullglob
-  for d in "$CR_HOME"/tasks/*/; do
-    id="$(basename "$d")"; [[ -f "$d/meta.json" ]] || continue
+  dirs=("$CR_HOME"/tasks/*/)
+  [[ -n "$only" ]] && dirs=("$CR_HOME/tasks/$only/") # one task (resolve, show): read only its record
+  for d in "${dirs[@]}"; do
+    id="${d%/}"; id="${id##*/}"; [[ -f "$d/meta.json" ]] || continue
     [[ -z "$only" || "$id" == "$only" ]] || continue
     st="$(state_of "$id")"
     [[ $all -eq 1 || "$st" != closed ]] || continue
@@ -1181,6 +1185,10 @@ chartroom - run a crew of coding agents from one agent session (the XO)
   chartroom resolve <id> [--json]         a full or short id (as the dashboard shows it) -> the
                                           task id, or the inbox item (i-xxxx); fails if unknown
                                           or ambiguous
+  chartroom show <id> [--json]            one item in detail (an id as resolve takes it): the
+                                          board's card plus the commander's intent, the last
+                                          events, the outcome, the report's summary, PRs, the
+                                          artifacts and where the worker runs
   chartroom inbox add [--project P] <text>
                                           add a dated "Waiting on the commander" item with a
                                           stable id, labelled [P] (a name, or a repo path: its
@@ -1258,6 +1266,7 @@ case "$cmd" in
   init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|artifact|rule|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|version|help) "cmd_$cmd" "$@" ;;
   install-skills) cmd_install_skills "$@" ;;
   ls) cmd_status "$@" ;;
+  show) cmd_show "$@" ;;
   -h|--help) cmd_help ;;
   -v|--version) cmd_version ;;
   *) die "unknown command '$cmd' (try: chartroom help)" ;;

@@ -103,7 +103,7 @@ dashboard_json() { # [pr-states-file]
   while IFS= read -r row; do
     id="$(jq -r .id <<<"$row")"
     rows+=("$(jq -c --argjson x "$(dashboard_task_extra "$id")" '. + $x' <<<"$row")")
-  done < <(status_rows --all)
+  done < <(status_rows --all ${CR_BOARD_ID:+--id "$CR_BOARD_ID"}) # CR_BOARD_ID (`show`): that task alone; the inbox stays
   local prs='{}'
   if [[ -n "$prs_file" && -s "$prs_file" ]]; then prs="$(jq -c 'if type == "object" then . else {} end' "$prs_file" 2>/dev/null || echo '{}')"; fi
   arts="$(artifacts_json --open)"
