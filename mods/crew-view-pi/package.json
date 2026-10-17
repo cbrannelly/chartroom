@@ -1,0 +1,14 @@
+{
+  "name": "chartroom-crew-view-pi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "chartroom's crew, live in the XO's pi session: a band above the editor and a /crew browser of the items. The pair of mods/crew-view (Claude Code).",
+  "license": "MIT",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./index.ts"] },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
