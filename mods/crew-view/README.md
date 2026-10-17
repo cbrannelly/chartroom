@@ -1,6 +1,6 @@
 # crew-view
 
-A Claude Code mod (function hooks, Claude Code 2.1.296 or newer) that shows the chartroom crew
+A Claude Code mod (function hooks; built and verified on Claude Code 2.1.302) that shows the chartroom crew
 live inside the XO's session:
 
 - **A band above the prompt**, one line, one emoji per lane with its count, every item that

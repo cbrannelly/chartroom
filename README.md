@@ -80,7 +80,7 @@ Per agent:
 
 ### A live crew view in Claude Code (and pi)
 
-`mods/crew-view` is a Claude Code mod (2.1.296 or newer) that draws the crew inside the XO's
+`mods/crew-view` is a Claude Code mod (verified on Claude Code 2.1.302) that draws the crew inside the XO's
 session: a one-line band above the prompt (`⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · ✅ 1`,
 one emoji per lane, every item that needs you labelled with its project) and a `/crew` pane that
 browses the board's items, the dashboard inside Claude Code. Tab or the arrows walk the items,
@@ -674,7 +674,7 @@ through your forge's CLI.
 shellcheck -x -S warning bin/chartroom lib/*.sh lib/backends/*.sh install.sh scripts/*.sh test/stub-agent test/windows-smoke.sh test/fakes/*
 bats test/                 # no herdr/tmux/cmux/claude/codex needed: fakes and a stub agent
 scripts/privacy-gate.sh    # no personal data in tracked files
-claude plugin test mods/crew-view   # the Claude Code mod's tests (Claude Code 2.1.296 or newer)
+claude plugin test mods/crew-view   # the Claude Code mod's tests (verified on Claude Code 2.1.302)
 ```
 
 Maintainers: merge by fast-forward pushing `main` from a local clone whose commits use the
