@@ -111,9 +111,14 @@ async function poll($: EngineInterface): Promise<void> {
   } finally {
     polling = false
   }
-  // An open detail follows the board.
+  // A detail on screen follows the board; one left open in a closed pane waits for /crew.
   const ref = await read($, selected).catch(() => null)
-  if (ref && (await read($, view)) !== 'list') await loadDetail($, ref)
+  if (!ref || (await read($, view)) === 'list') return
+  const shown = await $.ui.panes().then(
+    panes => panes.some(p => p.id === PANE),
+    () => true,
+  )
+  if (shown) await loadDetail($, ref)
 }
 
 // The ids whose `chartroom show` is running, so a poll never stacks a second one.

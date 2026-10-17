@@ -72,22 +72,27 @@ export default function crewView(pi: ExtensionAPI) {
   const redraws = new Set<() => void>()
   const redraw = () => redraws.forEach(fn => fn())
 
-  /** One `chartroom <args>` run: `chartroom` on PATH, then ~/.local/bin (a thin GUI PATH). */
-  async function runChartroom(args: string[]): Promise<{ stdout: string } | { error: string }> {
-    for (const bin of ['chartroom', `${process.env.HOME ?? ''}/.local/bin/chartroom`]) {
-      try {
-        const ran = await pi.exec(bin, args, { timeout: 20_000 })
-        if (ran.code === 0) return { stdout: ran.stdout }
-        if (ran.code === 127) continue
-        if (ran.killed) return { error: `chartroom ${args[0]} timed out` }
-        const why = (ran.stderr.trim().split('\n')[0] ?? '').replace(/^chartroom:\s*/, '')
-        return { error: `chartroom ${args[0]} failed${why ? `: ${why}` : ` (exit ${ran.code})`}` }
-      } catch (err) {
-        // A rejection is a command that could not start (ENOENT): try the next one.
-        if (!/ENOENT|not found/i.test(String(err))) return { error: `chartroom ${args[0]}: ${String(err).split('\n')[0]}` }
-      }
+  /**
+   * The chartroom to run: on PATH, then ~/.local/bin (a thin GUI PATH). Looked up first,
+   * since pi's exec reports a command that cannot start as a plain exit 1.
+   */
+  function chartroomBin(): string | null {
+    const dirs = (process.env.PATH ?? '').split(':').filter(Boolean)
+    for (const bin of [...dirs.map(d => `${d}/chartroom`), `${process.env.HOME ?? ''}/.local/bin/chartroom`]) {
+      if (existsSync(bin)) return bin
     }
-    return { error: 'chartroom not found' }
+    return null
+  }
+
+  /** One `chartroom <args>` run. */
+  async function runChartroom(args: string[]): Promise<{ stdout: string } | { error: string }> {
+    const bin = chartroomBin()
+    if (!bin) return { error: 'chartroom not found' }
+    const ran = await pi.exec(bin, args, { timeout: 20_000 })
+    if (ran.code === 0) return { stdout: ran.stdout }
+    if (ran.killed) return { error: `chartroom ${args[0]} timed out` }
+    const why = (ran.stderr.trim().split('\n')[0] ?? '').replace(/^chartroom:\s*/, '')
+    return { error: `chartroom ${args[0]} failed${why ? `: ${why}` : ` (exit ${ran.code})`}` }
   }
 
   async function poll() {

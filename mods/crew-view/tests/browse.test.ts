@@ -45,6 +45,20 @@ test('a row opens its item: chartroom show runs and the detail draws; back retur
   expect(await ui.find({ key: 'act-back' })).toBeUndefined()
 })
 
+test('an open detail follows the board while the pane is open, and rests once it closes', async ($, on) => {
+  let open = true
+  on('ui.panes', () => ({ value: open ? [{ id: 'crew', title: 'Crew', isShown: true, isFocused: true, isPlaced: true }] : [] }))
+  const { w, ui } = await pane($, on)
+  await ui.press({ key: 'row-108a' })
+  const shows = () => w.runs.filter(r => r[1] === 'show').length
+  expect(shows()).toBe(1)
+  await w.clock.advance(15_000)
+  expect(shows()).toBe(2)
+  open = false
+  await w.clock.advance(15_000)
+  expect(shows()).toBe(2)
+})
+
 test('continue puts /continue <id> in an empty prompt; a draft is kept and the line copied', async ($, on) => {
   const world = XO_WORLD()
   const { w, ui } = await pane($, on, world)
