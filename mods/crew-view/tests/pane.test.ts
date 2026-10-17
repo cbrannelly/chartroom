@@ -36,7 +36,7 @@ test('/crew opens the pane and it draws the board', async ($, on) => {
   const ui = await $.ui.mount({ plugin: 'crew-view', surface: 'terminal', component: 'Pane', requestId: 'crew', props: PANE_PROPS(90) })
   expect(await ui.find({ type: 'Text', text: /^🙋 needs you · 🏃 running/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '🙋 NEEDS YOU (3)' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /\[chartroom\] 98e2 +Live crew view mod/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'row-98e2', text: /\[chartroom\] 98e2 +Live crew view mod/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /updated 15:12:30Z/ })).toBeDefined()
 })
 

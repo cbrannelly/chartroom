@@ -1,5 +1,5 @@
 // Pure helpers for crew-view: no `$`, so the tests can call them directly.
-import type { CrewBoard, CrewItem } from '../types'
+import type { CrewBoard, CrewDetail, CrewItem } from '../types'
 
 // ---------------------------------------------------------------- home and scope
 
@@ -65,6 +65,7 @@ function trimItem(raw: unknown): CrewItem | null {
   const type = str(r.type) ?? 'task'
   return {
     type,
+    ref: str(r.short_id),
     short_id: str(r.short_id) ?? id.slice(-4),
     project: str(r.project),
     title: str(r.title) ?? id,
@@ -228,7 +229,8 @@ export function fit(text: string, width: number): string {
   return `${out}…${' '.repeat(Math.max(0, width - 1 - n))}`
 }
 
-export type PaneLine = { key: string; text: string; tone: Tone; bold?: boolean }
+/** One line of the pane; an item's row carries the item's `ref` (pressing it opens the item). */
+export type PaneLine = { key: string; text: string; tone: Tone; bold?: boolean; ref?: string }
 
 /**
  * The pane's lines sized to `width` columns: the emoji legend, then a header per lane with
@@ -249,8 +251,164 @@ export function paneLines(board: CrewBoard, width: number, nowMs: number): PaneL
     lines.push({ key: `h-${lane.title}`, text: `${lane.emoji} ${lane.title} (${lane.items.length})`, tone: lane.title === 'NEEDS YOU' && lane.items.length ? 'warn' : lane.title === 'FAILED' ? 'error' : 'plain', bold: true })
     for (const [n, item] of lane.items.entries()) {
       const row = `  ${label(item).padEnd(projW)} ${item.short_id.padEnd(idW)} ${fit(item.title, titleW)} ${item.state.padEnd(stateW)} ${age(item.last_at, nowMs).padStart(ageW)}`
-      lines.push({ key: `r-${lane.title}-${n}`, text: row, tone: lane.title === 'LANDED' ? 'dim' : 'plain' })
+      lines.push({ key: `r-${lane.title}-${n}`, text: row, tone: lane.title === 'LANDED' ? 'dim' : 'plain', ...(item.ref ? { ref: item.ref } : {}) })
     }
   }
   return lines
+}
+
+// ---------------------------------------------------------------- detail
+
+function arr(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null) : []
+}
+
+function event(v: unknown): CrewDetail['outcome'] {
+  if (typeof v !== 'object' || v === null) return null
+  const r = v as Record<string, unknown>
+  return { at: str(r.at) ?? '', kind: str(r.kind) ?? '?', text: str(r.text) ?? '' }
+}
+
+/** `chartroom show <id> --json` output to the detail the views draw, or an error line. */
+export function parseDetail(stdout: string): { detail: CrewDetail } | { error: string } {
+  let raw: unknown
+  try {
+    raw = JSON.parse(stdout)
+  } catch {
+    return { error: 'chartroom show: unreadable output' }
+  }
+  if (typeof raw !== 'object' || raw === null) return { error: 'chartroom show: unreadable output' }
+  const r = raw as Record<string, unknown>
+  const type = str(r.type) ?? 'task'
+  const report = typeof r.report === 'object' && r.report !== null ? (r.report as Record<string, unknown>) : null
+  const attach = typeof r.attach === 'object' && r.attach !== null ? (r.attach as Record<string, unknown>) : null
+  return {
+    detail: {
+      type,
+      id: str(r.id) ?? '',
+      ref: str(r.short_id),
+      title: str(r.title) ?? str(r.id) ?? '?',
+      project: str(r.project),
+      state: str(r.state) ?? '?',
+      reason: str(r.reason),
+      lane: str(r.lane),
+      live: str(r.live),
+      backend: str(r.backend),
+      date: str(r.date),
+      text: str(r.text),
+      waiting_on: str(r.waiting_on),
+      waiting_until: str(r.waiting_until),
+      intent: str(r.intent),
+      events: arr(r.events).map(event).filter((x): x is NonNullable<typeof x> => x !== null),
+      outcome: event(r.outcome),
+      report: report && str(report.path) ? { path: str(report.path) ?? '', summary: str(report.summary) } : null,
+      prs: arr(r.prs).flatMap(p => (str(p.url) ? [{ url: str(p.url) ?? '', state: str(p.state) ?? 'UNKNOWN' }] : [])),
+      artifacts: arr(r.artifacts).flatMap(a => (str(a.ref) ? [{ ref: str(a.ref) ?? '', title: str(a.title) ?? '', kind: str(a.kind) ?? 'note' }] : [])),
+      attach: attach ? { where: str(attach.where) ?? '?', command: str(attach.command) } : null,
+      worktree: str(r.worktree),
+    },
+  }
+}
+
+/** `text` word-wrapped to `width` columns, at most `max` lines (the last cut with `…`). */
+export function wrap(text: string, width: number, max: number): string[] {
+  const out: string[] = []
+  for (const para of text.split('\n')) {
+    let line = ''
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word
+      if (columns(next) <= width || !line) line = next
+      else {
+        out.push(line)
+        line = word
+      }
+    }
+    out.push(line)
+  }
+  const lines = out.map(l => (columns(l) > width ? fit(l, width).trimEnd() : l))
+  if (lines.length <= max) return lines
+  return [...lines.slice(0, max - 1), fit(`${lines[max - 1] ?? ''} …`, width).trimEnd()]
+}
+
+/** The lane's name as the pane's lanes say it. */
+function laneName(d: CrewDetail): string {
+  if (d.state === 'failed') return 'failed'
+  return { needs_you: 'needs you', in_progress: 'running', on_hold: 'on hold', ready: 'landed', recent: 'landed' }[d.lane ?? ''] ?? 'off the board'
+}
+
+/** A detail line; a PR or artifact line is pressable (`press` says which one). */
+export type DetailLine = PaneLine & { press?: { kind: 'pr' | 'artifact'; index: number } }
+
+/**
+ * The detail view's lines sized to `width` columns: the item's head, then its sections
+ * (intent or text, last events, report or outcome, PRs, artifacts, worker), each only when
+ * it has something.
+ */
+export function detailLines(d: CrewDetail, width: number, nowMs: number): DetailLine[] {
+  const w = Math.max(20, width)
+  const lines: DetailLine[] = []
+  const tone: Tone = d.state === 'failed' ? 'error' : d.lane === 'needs_you' ? 'warn' : d.lane === 'ready' || d.lane === 'recent' ? 'dim' : 'plain'
+  const head = `${d.ref ?? '-'}  ${d.project ? `[${d.project}] ` : d.type === 'inbox' ? '[inbox] ' : ''}${d.title}`
+  lines.push({ key: 'head', text: fit(head, w).trimEnd(), tone: 'plain', bold: true })
+  const facts = [d.state, d.reason && d.reason !== d.state ? d.reason : null, laneName(d), d.type === 'task' && d.live ? `live ${d.live}` : null, d.type === 'task' ? d.backend : null]
+  lines.push({ key: 'state', text: fit(`${LANE_EMOJI[laneEmoji(d)]} ${facts.filter(Boolean).join(' · ')}`, w).trimEnd(), tone })
+  if (d.date && d.type === 'inbox') lines.push({ key: 'since', text: `since ${d.date}`, tone: 'dim' })
+  if (d.waiting_on) {
+    for (const [n, l] of wrap(`waiting on: ${d.waiting_on}${d.waiting_until ? ` · until ${d.waiting_until}` : ''}`, w, 3).entries()) {
+      lines.push({ key: `wait-${n}`, text: l, tone: 'warn' })
+    }
+  }
+  const section = (title: string, body: string[], key: string, bodyTone: Tone = 'plain') => {
+    if (!body.length) return
+    lines.push({ key: `h-${key}`, text: title, tone: 'dim', bold: true })
+    for (const [n, l] of body.entries()) lines.push({ key: `${key}-${n}`, text: `  ${l}`, tone: bodyTone })
+  }
+  if (d.type === 'inbox') section('QUESTION', wrap(d.text ?? d.title, w - 2, 10), 'text')
+  else section('INTENT', d.intent ? wrap(d.intent, w - 2, 6) : [], 'intent')
+  section('LAST EVENTS', d.events.slice(-5).map(e => fit(`${age(e.at, nowMs).padStart(3)} ${e.kind}: ${e.text.replace(/\s+/g, ' ')}`, w - 2).trimEnd()), 'event')
+  if (d.report) section(`REPORT  ${d.report.path}`, d.report.summary ? wrap(d.report.summary, w - 2, 8) : ['(no summary)'], 'report')
+  else if (d.outcome) section('OUTCOME', wrap(`${d.outcome.kind}: ${d.outcome.text}`, w - 2, 4), 'outcome')
+  if (d.prs.length) {
+    lines.push({ key: 'h-prs', text: 'PRS', tone: 'dim', bold: true })
+    for (const [n, p] of d.prs.entries()) {
+      const state = p.state && p.state !== 'UNKNOWN' ? ` (${p.state.toLowerCase()})` : ''
+      lines.push({ key: `pr-${n}`, text: fit(`  ${p.url}${state}`, w).trimEnd(), tone: 'plain', press: { kind: 'pr', index: n } })
+    }
+  }
+  if (d.artifacts.length) {
+    lines.push({ key: 'h-artifacts', text: 'ARTIFACTS', tone: 'dim', bold: true })
+    for (const [n, a] of d.artifacts.entries()) {
+      lines.push({ key: `artifact-${n}`, text: fit(`  ${a.ref}  ${a.title} (${a.kind})`, w).trimEnd(), tone: 'plain', press: { kind: 'artifact', index: n } })
+    }
+  }
+  if (d.attach) {
+    const worker = [`${d.attach.where}${d.attach.command ? ` · ${d.attach.command}` : ''}`, ...(d.worktree ? [`worktree ${d.worktree}`] : [])]
+    section('WORKER', worker.flatMap(l => wrap(l, w - 2, 2)), 'worker', 'dim')
+  }
+  return lines
+}
+
+function laneEmoji(d: CrewDetail): keyof typeof LANE_EMOJI {
+  if (d.state === 'failed') return 'failed'
+  return ({ needs_you: 'needsYou', in_progress: 'running', on_hold: 'onHold', ready: 'landed', recent: 'landed' } as const)[d.lane as 'needs_you'] ?? 'onHold'
+}
+
+// ---------------------------------------------------------------- actions
+
+export type ActionId = 'continue' | 'copy-id' | 'copy-pr' | 'report' | 'copy-artifact' | 'back'
+export type Action = { id: ActionId; hotkey: string; label: string }
+
+/**
+ * The detail view's actions, in order, each with its one-letter hotkey: continue and copy
+ * the id need the item's id; copy a PR, the report and copy an artifact need one to exist.
+ * `detail` is null while `chartroom show` runs, so the actions that need it wait.
+ */
+export function detailActions(ref: string | null, detail: CrewDetail | null): Action[] {
+  const out: Action[] = []
+  if (ref) out.push({ id: 'continue', hotkey: 'c', label: 'continue' }, { id: 'copy-id', hotkey: 'y', label: 'copy id' })
+  if (detail?.prs.length) out.push({ id: 'copy-pr', hotkey: 'p', label: detail.prs.length > 1 ? 'copy 1st PR' : 'copy PR' })
+  if (detail?.report) out.push({ id: 'report', hotkey: 'r', label: 'report' })
+  if (detail?.artifacts.length) out.push({ id: 'copy-artifact', hotkey: 'a', label: detail.artifacts.length > 1 ? 'copy 1st artifact' : 'copy artifact' })
+  out.push({ id: 'back', hotkey: 'b', label: 'back' })
+  return out
 }

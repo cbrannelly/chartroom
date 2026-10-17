@@ -6,12 +6,17 @@
 // `captain` or `chartroom` skill (skill.prompt: `/captain`, the Skill tool, or a preload). Until
 // then it registers nothing, starts no timer, runs no process and draws nothing. Once awake it
 // stays awake for the session; $.state keeps that across a hot reload.
+//
+// The /crew pane browses the board: each item is a Button (Tab or the arrows walk them, Enter
+// opens one), and an item opens into its detail (`chartroom show <id> --json`) with actions
+// on one-letter hotkeys: continue (`/continue <id>` into the prompt), copy the id or a PR,
+// read the report, copy an artifact, back.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
-import type { CrewBoard } from '../types'
-import { bandSegments, configPath, isUnderWorktrees, paneLines, parseBoard, resolveHome, samePath } from './crew'
-import type { Tone } from './crew'
+import type { CrewBoard, CrewDetail, CrewView } from '../types'
+import { bandSegments, configPath, detailActions, detailLines, isUnderWorktrees, paneLines, parseBoard, parseDetail, resolveHome, samePath } from './crew'
+import type { ActionId, Tone } from './crew'
 
 const PANE = 'crew'
 const POLL_MS = 15_000
@@ -22,6 +27,12 @@ const isXo = atom({ plugin: 'crew-view', key: 'isXo' } as const, false)
 const active = atom({ plugin: 'crew-view', key: 'active' } as const, false)
 const board = atom({ plugin: 'crew-view', key: 'board' } as const, null as CrewBoard | null)
 const error = atom({ plugin: 'crew-view', key: 'error' } as const, null as string | null)
+const view = atom({ plugin: 'crew-view', key: 'view' } as const, 'list' as CrewView)
+const selected = atom({ plugin: 'crew-view', key: 'selected' } as const, null as string | null)
+const detail = atom({ plugin: 'crew-view', key: 'detail' } as const, null as CrewDetail | null)
+const detailError = atom({ plugin: 'crew-view', key: 'detailError' } as const, null as string | null)
+const report = atom({ plugin: 'crew-view', key: 'report' } as const, null as { path: string; text: string } | null)
+const notice = atom({ plugin: 'crew-view', key: 'notice' } as const, null as string | null)
 
 const COLOR: Record<Tone, { color?: string; dimColor?: boolean }> = {
   plain: {},
@@ -56,19 +67,19 @@ async function detectXo($: EngineInterface, cwd: string, isInteractive: boolean)
   return a && b && samePath(a, b) ? chartroomHome : null
 }
 
-/** One `chartroom board --json` run: `chartroom` on PATH, then ~/.local/bin (a thin GUI PATH). */
-async function runBoard($: EngineInterface): Promise<{ stdout: string } | { error: string }> {
+/** One `chartroom <args>` run: `chartroom` on PATH, then ~/.local/bin (a thin GUI PATH). */
+async function runChartroom($: EngineInterface, args: string[]): Promise<{ stdout: string } | { error: string }> {
   const home = (await $.env.get('HOME')) ?? ''
   for (const bin of ['chartroom', `${home}/.local/bin/chartroom`]) {
     try {
-      const ran = await $.process.run([bin, 'board', '--json'], { timeoutMs: 20_000 })
+      const ran = await $.process.run([bin, ...args], { timeoutMs: 20_000 })
       if (ran.exitCode === 0) return { stdout: ran.stdout }
       if (ran.exitCode === 127) continue
       const why = (ran.stderr.trim().split('\n')[0] ?? '').replace(/^chartroom:\s*/, '')
-      return { error: `chartroom board failed${why ? `: ${why}` : ` (exit ${ran.exitCode})`}` }
+      return { error: `chartroom ${args[0]} failed${why ? `: ${why}` : ` (exit ${ran.exitCode})`}` }
     } catch (err) {
       // A rejection is a command that could not start, or one still running at the timeout.
-      if (/timed? ?out/i.test(String(err))) return { error: 'chartroom board timed out' }
+      if (/timed? ?out/i.test(String(err))) return { error: `chartroom ${args[0]} timed out` }
     }
   }
   return { error: 'chartroom not found' }
@@ -85,7 +96,7 @@ async function poll($: EngineInterface): Promise<void> {
   if (polling) return
   polling = true
   try {
-    const ran = await runBoard($)
+    const ran = await runChartroom($, ['board', '--json'])
     const parsed = 'error' in ran ? ran : parseBoard(ran.stdout)
     if ('error' in parsed) {
       await update($, error, () => parsed.error)
@@ -100,11 +111,124 @@ async function poll($: EngineInterface): Promise<void> {
   } finally {
     polling = false
   }
+  // An open detail follows the board.
+  const ref = await read($, selected).catch(() => null)
+  if (ref && (await read($, view)) !== 'list') await loadDetail($, ref)
+}
+
+// The ids whose `chartroom show` is running, so a poll never stacks a second one.
+const loading = new Set<string>()
+
+/** Reads one item's detail into $.state; a reply for an item no longer selected is dropped. */
+async function loadDetail($: EngineInterface, ref: string): Promise<void> {
+  if (loading.has(ref)) return
+  loading.add(ref)
+  try {
+    const ran = await runChartroom($, ['show', ref, '--json'])
+    if ((await read($, selected)) !== ref) return
+    const parsed = 'error' in ran ? ran : parseDetail(ran.stdout)
+    if ('error' in parsed) {
+      await update($, detailError, () => parsed.error)
+    } else {
+      await update($, detail, () => parsed.detail)
+      await update($, detailError, () => null)
+    }
+  } catch (err) {
+    await update($, detailError, () => `crew view: ${String(err).split('\n')[0]}`).catch(() => {})
+  } finally {
+    loading.delete(ref)
+  }
+}
+
+/** Moves the pane's focus ring onto `key`; a pane not holding the keys says no, which is fine. */
+function focusOn($: EngineInterface, key: string) {
+  void $.ui.focus({ requestId: PANE, key }).catch(() => {})
+}
+
+/** Opens an item's detail: the board's card at once, `chartroom show` when it answers. */
+async function openItem($: EngineInterface, ref: string): Promise<void> {
+  await update($, selected, () => ref)
+  await update($, view, () => 'detail')
+  await update($, notice, () => null)
+  await update($, detailError, () => null)
+  await update($, detail, d => (d?.ref === ref ? d : null))
+  focusOn($, 'act-continue')
+  await loadDetail($, ref)
+}
+
+async function back($: EngineInterface): Promise<void> {
+  const from = await read($, view)
+  const ref = await read($, selected)
+  await update($, notice, () => null)
+  if (from === 'report') {
+    await update($, view, () => 'detail')
+    focusOn($, 'act-report')
+    return
+  }
+  await update($, view, () => 'list')
+  if (ref) focusOn($, `row-${ref}`)
+}
+
+async function say($: EngineInterface, text: string) {
+  await update($, notice, () => text)
+}
+
+/** Puts `text` on the clipboard of the surface the press came from, and says how it went. */
+async function copy($: EngineInterface, text: string, what: string, surface?: RenderSurface) {
+  const done = await $.ui.copy({ text, ...(surface ? { surface } : {}) })
+  await say($, done.isCopied ? `copied ${what}` : `could not copy ${what} (${done.reason}): ${text}`)
+}
+
+/** `/continue <id>` into an empty prompt; a draft is never replaced: then it is copied. */
+async function continueItem($: EngineInterface, ref: string, surface?: RenderSurface) {
+  const line = `/continue ${ref}`
+  const box = await $.prompt.read()
+  if (box.text.trim() === '') {
+    const filled = await $.prompt.fill({ text: line, mode: 'replace' })
+    // The fill hands the keys to the prompt: Enter runs it.
+    if (filled.isFilled) return say($, `${line} is in the prompt: press Enter to run it`)
+  }
+  const done = await $.ui.copy({ text: line, ...(surface ? { surface } : {}) })
+  const why = box.text.trim() ? 'the prompt holds a draft, kept' : 'the prompt cannot take it now'
+  await say($, done.isCopied ? `${line} copied (${why}): paste it at the prompt` : `${why}; type ${line}`)
+}
+
+async function openReport($: EngineInterface) {
+  const d = await read($, detail)
+  if (!d?.report) return say($, 'no report yet')
+  try {
+    const text = await $.fs.read(d.report.path)
+    await update($, report, () => ({ path: d.report?.path ?? '', text }))
+    await update($, view, () => 'report')
+    focusOn($, 'act-back')
+  } catch (err) {
+    await say($, `could not read ${d.report.path}: ${String(err).split('\n')[0]}`)
+  }
+}
+
+async function copyArtifact($: EngineInterface, index: number, surface?: RenderSurface) {
+  const a = (await read($, detail))?.artifacts[index]
+  if (!a) return
+  const ran = await runChartroom($, ['artifact', 'show', a.ref])
+  if ('error' in ran) return say($, ran.error)
+  await copy($, ran.stdout, `artifact ${a.ref}`, surface)
+}
+
+async function act($: EngineInterface, id: ActionId, surface?: RenderSurface) {
+  const ref = await read($, selected)
+  const d = await read($, detail)
+  if (id === 'back') return back($)
+  if (id === 'report') return openReport($)
+  if (id === 'copy-artifact') return copyArtifact($, 0, surface)
+  if (id === 'copy-pr') return d?.prs[0] ? copy($, d.prs[0].url, d.prs[0].url, surface) : undefined
+  if (!ref) return
+  if (id === 'continue') return continueItem($, ref, surface)
+  if (id === 'copy-id') return copy($, ref, ref, surface)
 }
 
 async function openPane($: EngineInterface) {
   void poll($)
-  return $.ui.open({ id: PANE, title: 'Crew' })
+  return $.ui.open({ id: PANE, title: 'Crew', focus: true })
 }
 
 /** True when this is the XO's session and it has loaded the captain or chartroom skill. */
@@ -143,8 +267,10 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // /crew exists only once start() registered it.
-  on('command.run', { command: 'crew' }, async $ => {
+  // /crew exists only once start() registered it. `/crew <id>` opens that item.
+  on('command.run', { command: 'crew' }, async ($, e) => {
+    const ref = e.args.trim().replace(/^\[|\]$/g, '')
+    if (ref) void openItem($, ref)
     const opened = await openPane($)
     return { text: opened.isPlaced ? 'Crew pane opened.' : 'Crew pane is waiting for room: widen the terminal.' }
   })
@@ -179,9 +305,87 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (!(await isActive($))) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button, Markdown } = $.ui.resolve(e)
     const b = await read($, board)
     const err = await read($, error)
+    const shown = await read($, view)
+    const ref = await read($, selected)
+    const note = await read($, notice)
+    const width = e.props.bodyColumns
+    const now = await $.clock.now()
+    const noticeLine = note ? (
+      <Text key="notice" color="success" wrap="truncate">
+        {note}
+      </Text>
+    ) : null
+
+    if (shown === 'report' && ref) {
+      const r = await read($, report)
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row">
+            <Button key="act-back" plain hotkey="b" label="back" onPress={() => void back($)} />
+            <Text dimColor wrap="truncate">
+              {'  '}
+              {r?.path ?? ''}
+            </Text>
+          </Box>
+          <Markdown text={r?.text ?? ''} />
+        </Box>
+      )
+    }
+
+    if (shown === 'detail' && ref) {
+      const d = await read($, detail)
+      const dErr = await read($, detailError)
+      const card = d ? null : b ? paneLines(b, width, now).find(l => l.ref === ref) : undefined
+      const lines = d ? detailLines(d, width, now) : []
+      const draw = (line: (typeof lines)[number]) =>
+        line.press ? (
+          <Button
+            key={line.key}
+            plain
+            label={line.text}
+            onPress={press =>
+              void (line.press?.kind === 'pr'
+                ? copy($, d?.prs[line.press.index]?.url ?? '', 'the PR URL', press.surface)
+                : copyArtifact($, line.press?.index ?? 0, press.surface))
+            }
+          />
+        ) : (
+          <Text key={line.key} bold={line.bold} wrap="truncate" {...COLOR[line.tone]}>
+            {line.text}
+          </Text>
+        )
+      // The head (title, state), then the actions and what the last one did, then the sections:
+      // the actions stay in sight however long the detail, and lead the focus ring.
+      return (
+        <Box flexDirection="column">
+          {d ? (
+            lines.slice(0, 2).map(draw)
+          ) : (
+            <Text key="loading" dimColor wrap="truncate">
+              {card ? card.text.trim() : ref} · {dErr ?? 'reading…'}
+            </Text>
+          )}
+          <Box flexDirection="row" flexWrap="wrap">
+            {detailActions(ref, d).map(a => (
+              <Box key={`box-${a.id}`} marginRight={2}>
+                <Button key={`act-${a.id}`} plain hotkey={a.hotkey} label={a.label} onPress={press => void act($, a.id, press.surface)} />
+              </Box>
+            ))}
+          </Box>
+          {noticeLine}
+          {lines.slice(2).map(draw)}
+          {d && dErr ? (
+            <Text key="detail-error" dimColor wrap="truncate">
+              last read: {dErr}
+            </Text>
+          ) : null}
+        </Box>
+      )
+    }
+
     if (!b) {
       return (
         <Box flexDirection="column">
@@ -189,16 +393,20 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const now = await $.clock.now()
     return (
       <Box flexDirection="column">
-        {paneLines(b, e.props.bodyColumns, now).map(line => (
-          <Text key={line.key} bold={line.bold} wrap="truncate" {...COLOR[line.tone]}>
-            {line.text}
-          </Text>
-        ))}
+        {paneLines(b, width, now).map(line =>
+          line.ref ? (
+            <Button key={`row-${line.ref}`} plain label={line.text} {...(line.tone === 'dim' ? { dimColor: true } : {})} onPress={() => void openItem($, line.ref ?? '')} />
+          ) : (
+            <Text key={line.key} bold={line.bold} wrap="truncate" {...COLOR[line.tone]}>
+              {line.text}
+            </Text>
+          ),
+        )}
         <Text dimColor wrap="truncate">
-          updated {b.generated_at.slice(11, 19) || '?'}Z{err ? ` · last poll: ${err}` : ''} · /crew to refresh
+          updated {b.generated_at.slice(11, 19) || '?'}Z{err ? ` · last poll: ${err}` : ''} ·{' '}
+          {e.props.isFocused ? 'Tab/arrows move, Enter opens, Esc to the prompt' : '/crew to refresh, ctrl+x tab to browse'}
         </Text>
       </Box>
     )
