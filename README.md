@@ -75,15 +75,20 @@ Per agent:
 | Claude Code | `chartroom install-skills --claude`, **or** `/plugin marketplace add wolzey/chartroom` then `/plugin install chartroom@chartroom` (skills only; the CLI still comes from install.sh) | `Monitor` running `chartroom watch` |
 | Codex CLI | `chartroom install-skills --agents` (`~/.agents/skills`) | loop on `chartroom watch --once --timeout 1500` |
 | Gemini CLI | `chartroom install-skills --agents` (Gemini reads `~/.agents/skills`), or `gemini skills link <checkout>/skills/chartroom` | same as Codex |
-| pi | `chartroom install-skills --pi` | same as Codex |
+| pi | `chartroom install-skills --pi` (and, for the crew view, `pi install <checkout>/mods/crew-view-pi`) | same as Codex |
 | opencode, Cursor, Amp, Copilot, others | paste [`adapters/agents-md/AGENTS.md`](adapters/agents-md/AGENTS.md) into the agent's instructions, or start it in `~/.chartroom` (its `AGENTS.md` points at the skill) | same as Codex |
 
-### A live crew view in Claude Code
+### A live crew view in Claude Code (and pi)
 
 `mods/crew-view` is a Claude Code mod (2.1.296 or newer) that draws the crew inside the XO's
 session: a one-line band above the prompt (`⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · ✅ 1`,
-one emoji per lane, every item that needs you labelled with its project) and a `/crew` pane with
-the board's lanes. It polls `chartroom board --json` every 15 seconds. Install it at user scope:
+one emoji per lane, every item that needs you labelled with its project) and a `/crew` pane that
+browses the board's items, the dashboard inside Claude Code. Tab or the arrows walk the items,
+Enter opens one: its state, the commander's intent, the last events, the report's summary or the
+outcome, PRs, artifacts and where the worker runs. From there, `c` puts `/continue <id>` in the
+prompt (Enter runs it), `y` copies the id, `p` a PR URL, `a` an artifact, `r` reads the report,
+`b` goes back; `/crew <id>` opens an item directly. It polls `chartroom board --json` every 15
+seconds and reads an item with `chartroom show <id> --json`. Install it at user scope:
 
 ```
 /plugin install crew-view@chartroom
@@ -93,6 +98,11 @@ It stays inert (no command, timer, process or drawing) until the session loads t
 `chartroom` skill, and in every session but the XO's: an interactive one whose working directory
 is the chartroom home, not under `worktrees/`, with no `CHARTROOM_TASK`. Installed from a local checkout (`claude plugin marketplace add <checkout>`),
 `/reload-plugins` picks up edits. See [mods/crew-view/README.md](mods/crew-view/README.md).
+
+`mods/crew-view-pi` is the same band and browser for [pi](https://pi.dev) (0.87 or newer), gated
+the same way (`/skill:captain` or `/skill:chartroom` wakes it): `pi install <checkout>/mods/crew-view-pi`,
+for example `pi install ~/.local/share/chartroom/mods/crew-view-pi`. See
+[mods/crew-view-pi/README.md](mods/crew-view-pi/README.md).
 
 ### Windows
 
@@ -221,6 +231,7 @@ chartroom dashboard --daemon --expose  # on the network too, behind an access to
 chartroom dashboard stop             # (or: status)
 chartroom dashboard --json           # the same lanes, no server
 chartroom board                      # the same lanes in the terminal, one line per item
+chartroom show 21ba                  # one item in detail (--json for the crew views)
 ```
 
 A one-page, read-only view of the fleet that refreshes every 5 seconds, so you can see what
@@ -284,7 +295,10 @@ How it is built, and what it promises:
   `continue` skill takes you straight to what the item needs from you.
   `chartroom resolve <id>` maps any short or full id back. `chartroom board` prints the same
   lanes in the terminal (short id, `[project]`, title, state, last event; color only on a
-  terminal, `--json` for the lanes JSON). Inbox items get their tag from
+  terminal, `--json` for the lanes JSON), and `chartroom show <id>` one item in detail: its card
+  plus the commander's intent, the last events, the outcome, the report's summary, PRs,
+  artifacts and where the worker runs (`--json` adds those fields to the card's, the board's
+  fields unchanged). Inbox items get their tag from
   `chartroom inbox add [--project P] <text>` (or `chartroom inbox tag` for lines written by
   hand); it never changes as other items come and go.
 - **Every question carries its project.** `chartroom inbox add --project webapp "which region?"`
@@ -660,6 +674,7 @@ through your forge's CLI.
 shellcheck -x -S warning bin/chartroom lib/*.sh lib/backends/*.sh install.sh scripts/*.sh test/stub-agent test/windows-smoke.sh test/fakes/*
 bats test/                 # no herdr/tmux/cmux/claude/codex needed: fakes and a stub agent
 scripts/privacy-gate.sh    # no personal data in tracked files
+claude plugin test mods/crew-view   # the Claude Code mod's tests (Claude Code 2.1.296 or newer)
 ```
 
 Maintainers: merge by fast-forward pushing `main` from a local clone whose commits use the

@@ -24,6 +24,29 @@ are stable from 0.1.0.
   the XO save whatever it drafts for the commander to send or run as an artifact and give the
   ref, never the text in chat alone; `bearings` lists open messages and runbooks under Needs
   you, and `continue` names an item's artifacts.
+||||||| parent of 2a25b8a (docs: the item browser, chartroom show and the pi crew view)
+- `chartroom show <id> [--json]`: one item in detail, by any id `resolve` takes (a short id, an
+  inbox tag, a full id). The board's card for it, plus what only the task's files say: the
+  first lines of the commander's intent, the last five worker events, the outcome (the newest
+  `done` or `failed`), the report's path and summary (its "Outcome" section, else its first
+  lines), PRs, the open artifacts (as the board lists them, with their refs), the
+  worktree and branch, and where the worker runs with the command that takes you there
+  (`chartroom attach <id>`), all from disk. `--json` only adds fields to the card's. A task
+  closed past the recent window still shows, from its record. It builds a one-task board, and
+  `status_rows --id` now reads only that task's record, so a lookup is under a second on a home
+  of 160 tasks (and `board` forks once less per task).
+- crew-view 0.2.0: the `/crew` pane browses the items, the dashboard's equivalent inside Claude
+  Code. Each row is a Button (Tab or the arrows walk them, Enter opens one) and opens into the
+  item's detail from `chartroom show --json`, with one-letter actions: `c` puts
+  `/continue <id>` in the prompt (Enter runs it; a draft is kept and the line copied instead),
+  `y` copies the id, `p` a PR URL, `a` an artifact's text, `r` reads the report in the pane,
+  `b` goes back. `/crew <id>` opens an item directly. The band, the XO-only scope and the
+  inert-until-the-skill-loads behaviour are unchanged.
+- `mods/crew-view-pi`, the same band and browser for pi (0.87 or newer), gated the same way
+  (`/skill:captain` or `/skill:chartroom`, or the model reading either skill, in the XO's
+  session in the chartroom home); `c` puts `/skill:continue <id>` in the editor. It shares the
+  Claude Code mod's lane, band and detail code. Install with
+  `pi install <checkout>/mods/crew-view-pi`.
 - `chartroom sweep`, and a `sweep` skill (linked by `install-skills`): an audit of what the crew
   left running, and with `--apply` freeing the safe part of it. It finds sessions of finished
   tasks, done tasks safe to close (worktree clean, every commit in the base ref), orphaned
