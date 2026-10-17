@@ -92,11 +92,12 @@ dashboard_task_extra() { # <id>
     last_event_at: (if $report == "" then null else ($report[0:20]) end)}'
 }
 
-# The board: status rows + extras + inbox, classified into lanes by lib/dashboard/lanes.jq.
-# <pr-states> is an optional JSON file {url: {state, reviewDecision, isDraft}} (the server
-# fills it from gh); without it every PR is "unknown" and nothing depends on gh.
+# The board: status rows + extras + inbox + open artifacts, classified into lanes by
+# lib/dashboard/lanes.jq. <pr-states> is an optional JSON file {url: {state, reviewDecision,
+# isDraft}} (the server fills it from gh); without it every PR is "unknown" and nothing
+# depends on gh.
 dashboard_json() { # [pr-states-file]
-  local prs_file="${1:-}" row id rows=() hours
+  local prs_file="${1:-}" row id rows=() hours arts
   hours="$(cfg DASHBOARD_RECENT_HOURS '' 48)"
   [[ "$hours" =~ ^[0-9]+$ ]] || die "CHARTROOM_DASHBOARD_RECENT_HOURS must be a whole number of hours"
   while IFS= read -r row; do
@@ -105,8 +106,10 @@ dashboard_json() { # [pr-states-file]
   done < <(status_rows --all)
   local prs='{}'
   if [[ -n "$prs_file" && -s "$prs_file" ]]; then prs="$(jq -c 'if type == "object" then . else {} end' "$prs_file" 2>/dev/null || echo '{}')"; fi
+  arts="$(artifacts_json --open)"
   printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s \
     --argjson inbox "$(dashboard_inbox)" --argjson prs "$prs" --argjson hours "$hours" \
+    --argjson artifacts "$arts" --argjson artifact_counts "$(jq -c "$ARTIFACT_COUNTS_JQ" <<<"$arts")" \
     --arg home "$CR_HOME" --arg version "$CR_VERSION" \
     -f "$CR_ROOT/lib/dashboard/lanes.jq"
 }
@@ -306,10 +309,12 @@ cmd_dashboard() {
 }
 
 # `chartroom board`: the dashboard's lanes in the terminal, from the same dashboard_json, so
-# the two never disagree. One line per item: short id, [project], title, state, a snippet of
-# the last event (the project leads the text, so a question is placed at a glance). Color only when stdout is a terminal (and NO_COLOR is unset); --json is the lanes JSON.
+# the two never disagree. One line per item: short id, [project], title, state, the refs of
+# its open artifacts, a snippet of the last event (the project leads the text, so a question
+# is placed at a glance); then the artifact count. Color only when stdout is a terminal (and
+# NO_COLOR is unset); --json is the lanes JSON.
 cmd_board() {
-  local json=0 color=0 a
+  local json=0 color=0 a board
   [[ -t 1 && -z "${NO_COLOR:-}" ]] && color=1
   for a in "$@"; do
     case "$a" in
@@ -320,7 +325,8 @@ cmd_board() {
     esac
   done
   if [[ $json -eq 1 ]]; then dashboard_json; return; fi
-  dashboard_json | jq -r --argjson color "$color" '
+  board="$(dashboard_json)"
+  jq -r --argjson color "$color" '
     def c($code): if $color == 1 then "\u001b[" + $code + "m" + . + "\u001b[0m" else . end;
     def cut($n): if length > $n then .[0:$n - 1] + "…" else . end;
     def pad($n): . + (" " * ([$n - length, 0] | max));
@@ -336,9 +342,12 @@ cmd_board() {
          | ((.short_id // "-") | pad($w) | c("1")) + "  "
            + (if (.project // "") != "" then ("[" + .project + "]" | c("1")) + " " else "" end) + ((.title // .id) | cut(60))
            + "  " + ("[" + (.reason // .state // "") + "]" | c("2"))
+           + ((.artifacts // []) | if length == 0 then ""
+              else "  " + ("[artifact" + (if length > 1 then "s " else " " end) + (map(.ref) | join(", ")) + "]" | c("1;35")) end)
            + (if .type == "inbox" then (if .date then "  since " + .date else "" end)
               elif .waiting_on then "  waiting on: " + (.waiting_on | cut(60))
               elif .last_event then "  " + (.last_event | gsub("\n"; " ") | cut(70)) else "" end)
          | "  " + . end),
-      ""'
+      ""' <<<"$board"
+  artifact_line "$(jq -c '.artifacts // {}' <<<"$board")"
 }

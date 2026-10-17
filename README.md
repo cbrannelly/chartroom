@@ -152,7 +152,7 @@ chartroom doctor
   workspace name, branch prefix, harness) and your standing preferences (`commander.md`,
   `rulings.log`, `projects.md`) are safe to keep in your dotfiles. Everything else in the home is per machine:
   `tasks/` records hold local worktree paths, process ids and session handles, and `worktrees/`
-  holds the checkouts themselves. Never sync `tasks/`, `worktrees/`, `inbox.md`, `.watch-cursor`
+  holds the checkouts themselves. Never sync `tasks/`, `worktrees/`, `inbox.md`, `inbox/`, `.watch-cursor`
   or `.dashboard.*` between machines.
 - **Write the config before installing.** `install.sh` runs `chartroom init` on whichever home
   the config names, and `init` never overwrites an existing file.
@@ -241,14 +241,17 @@ header:
 Each card shows the title, project (above the title on a Needs you card, so you can tell which
 project a question is for at a glance), age, the last worker event, PR/MR links found in
 `events.log` and `report.md`, and links that open the task's brief, report, plan and event log
-as plain text. Approvals given in chat but not yet in a brief are listed under Needs you.
+as plain text. A task or inbox card with open [artifacts](#artifacts-drafts-that-outlive-the-chat)
+(drafts for you to send or run) shows a chip for each: one click copies the text and opens it,
+with a copy button beside it. Approvals given in chat but not yet in a brief are listed under
+Needs you.
 
 How it is built, and what it promises:
 
 - **Loopback by default, read-only always.** A Python standard-library server (`python3`,
   nothing to install) bound to `127.0.0.1` unless you put it on the network (below). It answers
-  `GET` only, serves just the page, the lanes JSON (`/api/dashboard`) and the five task files
-  above, and has no endpoint that changes anything. On loopback it refuses requests whose
+  `GET` only, serves just the page, the lanes JSON (`/api/dashboard`), the five task files
+  above and artifact texts, and has no endpoint that changes anything. On loopback it refuses requests whose
   `Host` is not `127.0.0.1` or `localhost` (DNS rebinding) and needs no auth, because nothing
   off the machine can reach it.
 - **No external requests from the page.** CSS and JS are inline; no CDNs, fonts or analytics.
@@ -383,6 +386,41 @@ Type the trailing slash (`chartroom/`) or the scheme, or the browser may search 
 Undo by reversing each step: remove the hosts line, the LaunchDaemons and the alias
 (`sudo ifconfig lo0 -alias 127.0.0.2`), and `caddy untrust`.
 
+## Artifacts: drafts that outlive the chat
+
+The XO often drafts something for you to act on: a message to send, commands to run, notes.
+In chat, that text scrolls away or is compacted, and you have to ask for it again. An artifact
+keeps it with the task or inbox item it belongs to, until you say it is done:
+
+```bash
+chartroom artifact add 21ba --kind message --title "Reply to the review" reply.md   # prints 21ba/reply-to-the-review
+echo 'make release' | chartroom artifact add i-7f3a --kind runbook --title "Cut the release" -
+chartroom artifact list                    # open ones, newest first (--all: done too; --json)
+chartroom artifact show 21ba/reply-to-the-review
+chartroom artifact copy 21ba/reply-to-the-review   # onto the clipboard
+chartroom artifact done 21ba/reply-to-the-review   # sent: it stops showing as open
+```
+
+- **Kinds.** `message` is text to send, `runbook` is commands to run (written ready to paste),
+  `note` is anything else worth keeping.
+- **Refs** are `<id>/<slug>`: the task's short id or the inbox item's `i-xxxx` tag, as the
+  dashboard shows them (a full task id works too), and a slug of the title (`--slug` picks
+  another). The id alone works when it has one open artifact. Adding the same slug again
+  replaces the text and opens it again; there are no older versions.
+- **Where they show.** A chip on the card in the dashboard (one click copies and opens it), the
+  refs on the item's line in `chartroom board`, a count at the end of `board` and `status`, and
+  the `bearings` digest, which lists open messages and runbooks under Needs you.
+- **Clipboard.** `copy` uses `CHARTROOM_CLIPBOARD` if set (a command that reads the text on
+  stdin; `-` prints instead), else `pbcopy` (macOS), `wl-copy` (Wayland), `xclip` or `xsel`
+  (X11). Without any it prints the text.
+- **On disk.** The text is `tasks/<id>/artifacts/<slug>.md`, verbatim, beside a small
+  `<slug>.json` (title, kind, project, created, updated, done). An inbox item's artifacts live
+  in `inbox/<i-xxxx>/artifacts/`, so they outlive its line in `inbox.md`; `add` needs the item
+  to be open, the other commands do not. A task's events log notes each add and done.
+
+The chartroom skill has the XO save anything it drafts for you to send or run as an artifact
+before showing it, and give you the ref, never the text in chat alone.
+
 ## Housekeeping: sweep
 
 Finished work leaves things running: the agent sessions of done tasks, a `chartroom watch` whose
@@ -508,6 +546,9 @@ $CHARTROOM_HOME/                    default ~/.chartroom
   tasks/<id>/meta.json              {"schema":1, id, kind, backend, project, base_sha, branch, worktree, ...}
   tasks/<id>/brief.md  report.md  plan.md  final.md
   tasks/<id>/events.log             one line per event
+  tasks/<id>/artifacts/<slug>.md    a draft for the commander (message, runbook, note), verbatim,
+  tasks/<id>/artifacts/<slug>.json  with its title, kind, project, created, updated and done
+  inbox/<i-xxxx>/artifacts/         the same, for an inbox item
   .dashboard.pid  .dashboard.log    only while `chartroom dashboard --daemon` runs
   .dashboard.token                  the dashboard's access token (0600), once it has been on the network
   sweep.log                         what `chartroom sweep --apply` closed, stopped and killed, one line each
@@ -578,6 +619,7 @@ Environment variables win. Otherwise chartroom reads `~/.config/chartroom/config
 | `CHARTROOM_DASHBOARD_HOST` | `127.0.0.1` | the IPv4 address the dashboard binds; `0.0.0.0` is every interface (`--host` / `--expose` override). Beyond loopback it needs the access token |
 | `CHARTROOM_GH` | `gh` | the gh binary the dashboard uses for PR states |
 | `CHARTROOM_OPENER` | `open` / `xdg-open` (WSL: `wslview`, PowerShell; Git Bash: `start`) | command `dashboard open` runs with the URL |
+| `CHARTROOM_CLIPBOARD` | `pbcopy` / `wl-copy` / `xclip` / `xsel`, whichever is there | command `artifact copy` pipes the text into (split on spaces); `-` prints it instead |
 | `CHARTROOM_PLATFORM` | *(detected)* | `posix`, `wsl` or `msys` (Git Bash); override only if detection is wrong |
 | `CHARTROOM_HERDR_ANY_OS` | *(unset)* | `1` offers herdr on Git Bash, where its Windows preview is unverified |
 | `CHARTROOM_WAITING_GRACE_MINUTES` | `15` | a `waiting` worker turns `waiting-overdue` this long after its until-time |

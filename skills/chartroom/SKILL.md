@@ -241,6 +241,14 @@ others read between steps. `close` only marks it closed; its directory is never 
   <project>` labels an item that has none). When the commander approves something in chat that is not yet written into a
   task brief, add a dated line under "Approvals given in chat, not yet in a brief". Remove the
   line once it is answered or recorded in a brief.
+- **Artifacts.** Text for the commander to send or run (a message, a reply, commands, a
+  checklist), yours or a worker's, is saved before you show it, never left in chat alone:
+  `chartroom artifact add <task-or-inbox-id> --kind message|runbook|note --title "<one line>" <file|->`.
+  Attach it to the inbox item when the commander must act on it, else to its task. It prints a
+  ref (`21ba/reply-to-review`): give that and a one-line summary (the text too, if short); the
+  dashboard card shows it as a chip that opens and copies it, and `chartroom artifact copy <ref>`
+  copies it. A runbook is the commands themselves, ready to paste. To revise, `add` the same
+  title again. Once the commander says it went out or ran, `chartroom artifact done <ref>`.
 
 ## Steering the tools themselves
 

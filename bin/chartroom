@@ -11,6 +11,7 @@
 #   tasks/<id>/brief.md     the worker's contract (intent, spec, authority, protocol)
 #   tasks/<id>/events.log   append-only "<ts> <kind>: <text>" lines from workers + chartroom
 #   tasks/<id>/report.md    the worker's final report
+#   tasks/<id>/artifacts/   drafts for the commander to send or run (lib/artifacts.sh)
 #   rulings.log             append-only commander rulings, latest wins per topic (lib/rulings.sh)
 #
 # Usage: chartroom <command> [args]   (chartroom help for the list)
@@ -66,6 +67,8 @@ source "$CR_ROOT/lib/dashboard.sh"
 source "$CR_ROOT/lib/rulings.sh"
 # shellcheck source=../lib/sweep.sh
 source "$CR_ROOT/lib/sweep.sh"
+# shellcheck source=../lib/artifacts.sh
+source "$CR_ROOT/lib/artifacts.sh"
 for _f in "$CR_ROOT"/lib/backends/*.sh; do
   # shellcheck source=/dev/null
   source "$_f"
@@ -656,6 +659,7 @@ cmd_status() {
       { printf 'ID\tPROJECT\tSTATE\tLIVE\tBACKEND\tKIND\tLAST\n'; cat; } | table
   fi
   inbox_line
+  artifact_line
 }
 
 # One line counting open inbox.md items (bullets under the Waiting / Approvals headings,
@@ -1183,6 +1187,19 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           directory name; "multi" for several); prints the id
   chartroom inbox project <i-xxxx> <P>    label (or relabel) an open Waiting item with [P]
   chartroom inbox tag                     give every untagged Waiting item its id (idempotent)
+  chartroom artifact add <id> --kind message|runbook|note --title T [--slug S] <file|->
+                                          keep text drafted for the commander (a message to
+                                          send, commands to run, a note) with a task or an
+                                          inbox item (<id> as the dashboard shows it); prints
+                                          its ref, <id>/<slug>. The same slug again overwrites
+                                          the text (the slug is the title's unless --slug)
+  chartroom artifact list [<id>] [--all] [--json]
+                                          open artifacts, newest first (--all: done ones too)
+  chartroom artifact show <ref> [--path]  print the text (or its file). A ref is <id>/<slug>,
+                                          or <id> alone when it has one open artifact
+  chartroom artifact copy <ref>           put the text on the clipboard (CHARTROOM_CLIPBOARD,
+                                          else pbcopy, wl-copy, xclip, xsel), else print it
+  chartroom artifact done <ref>           sent or run: it stops showing as open
   chartroom rule add --topic T [--supersedes r-x|-] [--src S] <text>
                                           record a lasting commander ruling in rulings.log
                                           (append-only); the newest ruling in a topic wins and
@@ -1238,7 +1255,7 @@ EOF
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|rule|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|version|help) "cmd_$cmd" "$@" ;;
+  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|artifact|rule|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|version|help) "cmd_$cmd" "$@" ;;
   install-skills) cmd_install_skills "$@" ;;
   ls) cmd_status "$@" ;;
   -h|--help) cmd_help ;;

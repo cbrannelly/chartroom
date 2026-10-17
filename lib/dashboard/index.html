@@ -239,6 +239,17 @@
   .card .waiting .until { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
   .card .waiting .until.over { color: var(--needs); }
   .card .links { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; }
+  /* artifacts: drafts for the commander (a message to send, a runbook to run, a note), one chip
+     each; a click opens the text and copies it */
+  .card .atts { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .att { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 1px 9px 1px 7px;
+         font: inherit; font-size: 12px; line-height: 1.5; color: var(--ink); background: var(--chip); cursor: pointer;
+         border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 999px; }
+  .att svg { width: 13px; height: 13px; flex: none; color: var(--accent); }
+  .att .k { font: 600 10.5px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  .att .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .att:hover, .att:focus-visible { border-color: var(--accent); outline: none; }
+  .att.copied, .att.copied svg { color: var(--accent); border-color: var(--accent); }
 
   /* signal glyphs, one per state */
   .sig { position: relative; flex: none; width: 12px; height: 12px; margin-top: 3px; color: var(--accent); }
@@ -379,7 +390,7 @@
   [data-theme=hud] .brand h1::after { display: none; }
   [data-theme=hud] .meta, [data-theme=hud] .instruments { font-family: var(--mono); text-transform: uppercase; letter-spacing: .04em; }
   [data-theme=hud] .theme, [data-theme=hud] .gauge, [data-theme=hud] .badge, [data-theme=hud] .sid,
-  [data-theme=hud] .more, [data-theme=hud] .kind, [data-theme=hud] .banner { border-radius: 2px; }
+  [data-theme=hud] .more, [data-theme=hud] .kind, [data-theme=hud] .banner, [data-theme=hud] .att { border-radius: 2px; }
   [data-theme=hud] .gauge b, [data-theme=hud] .lane h2 .n { font-family: var(--display); font-weight: 700; }
   [data-theme=hud] .gauge .lamp, [data-theme=hud] .sig.dot::before, [data-theme=hud] .sig.dot::after { border-radius: 1px; }
   [data-theme=hud] .sig.ring::before { border-radius: 1px; border-style: dashed; }
@@ -448,7 +459,7 @@
     .gauge { align-items: center; }
     .gauge .lbl { white-space: normal; text-overflow: clip; line-height: 1.25; letter-spacing: .1em; }
     /* nothing under 12px on a phone or tablet */
-    .brand h1 small, .gauge .lbl, .badge, .sid, .kind, .clock, .log .t, .card .waiting .until,
+    .brand h1 small, .gauge .lbl, .badge, .sid, .kind, .clock, .log .t, .card .waiting .until, .att .k,
     [data-theme=hud] .badge, [data-theme=hud] .lane h2 .alias, [data-theme=hud] .card .links, .reticle .tagline { font-size: 12px; }
   }
   @media (max-width: 760px) {
@@ -476,6 +487,7 @@
     .card .links { gap: 0 4px; margin-top: 4px; }
     .card .links a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 8px; margin-left: -8px; }
     .card .links .badge { margin-right: 8px; }
+    .att { min-height: 44px; }
     .log li.open { min-height: 44px; align-items: center; }
     .more { min-height: 44px; }
     dialog .bar a, dialog button { display: inline-flex; align-items: center; justify-content: center;
@@ -531,7 +543,7 @@
 <main id="lanes"><div class="reticle off" id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><span class="tagline" id="lock-tag"></span></div></main>
 <div id="ghosts"></div>
 <dialog id="viewer">
-  <div class="bar"><b id="viewer-title"></b><a id="viewer-raw" target="_blank" rel="noopener">raw</a><button id="viewer-close" type="button">close</button></div>
+  <div class="bar"><b id="viewer-title"></b><a id="viewer-raw" target="_blank" rel="noopener">raw</a><button id="viewer-copy" type="button" hidden>copy</button><button id="viewer-close" type="button">close</button></div>
   <pre id="viewer-body"></pre>
 </dialog>
 <script>
@@ -589,6 +601,7 @@ const ICONS = {
   diamond: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 21 12 12 21 3 12Z"/><path d="M12 9 15 12 12 15 9 12Z" fill="currentColor" stroke="none"/></svg>',
   target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><rect x="10" y="10" width="4" height="4" fill="currentColor" stroke="none"/></svg>',
   cross: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5l-8.3 8.3a5.4 5.4 0 0 1-7.7-7.7l8.3-8.3a3.6 3.6 0 0 1 5.1 5.1l-8.3 8.3a1.8 1.8 0 0 1-2.6-2.6l7.7-7.6"/></svg>',
 };
 function icon(name) { const t = document.createElement("template"); t.innerHTML = ICONS[name]; return t.content.firstChild; }
 
@@ -693,8 +706,9 @@ function clockRow(c, motion) {
 
 function copyText(text) {
   if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  // (inside an open modal dialog when there is one: the page behind it is inert)
   const t = el("textarea", { readonly: "", style: "position:fixed;opacity:0" });
-  t.value = text; document.body.append(t); t.select();
+  t.value = text; (document.querySelector("dialog[open]") || document.body).append(t); t.select();
   try { return document.execCommand("copy") ? Promise.resolve() : Promise.reject(new Error("copy refused")); }
   finally { t.remove(); }
 }
@@ -709,6 +723,41 @@ function shortId(c) {
     copyText(cmd).then(() => { b.textContent = "copied"; b.classList.add("copied"); },
                        () => { b.textContent = "copy failed"; })
       .finally(() => setTimeout(() => { b.textContent = c.short_id; b.classList.remove("copied"); }, 1400));
+  });
+  return b;
+}
+
+// Artifacts: text drafted for the commander. The text is fetched as the card is drawn (and again
+// only when it changes), so a click can copy it at once: browsers allow a clipboard write only
+// inside the click itself.
+const artTexts = new Map(); // href -> {v: updated, p: promise of the text, text}
+function artHref(a) {
+  return "/" + (a.owner_type === "task" ? "task" : "inbox") + "/" + encodeURIComponent(a.owner) + "/artifacts/" + encodeURIComponent(a.slug) + ".md";
+}
+function artLoad(a) {
+  const href = artHref(a), hit = artTexts.get(href);
+  if (hit && hit.v === a.updated) return hit.p;
+  const entry = { v: a.updated, text: null };
+  entry.p = fetch(href, { cache: "no-store" })
+    .then((r) => r.ok ? r.text() : Promise.reject(new Error("could not load " + a.ref + " (" + r.status + ")")))
+    .then((t) => { entry.text = t; return t; }, (e) => { artTexts.delete(href); throw e; });
+  artTexts.set(href, entry);
+  return entry.p;
+}
+function artifactChip(c, a) {
+  const what = "open and copy " + a.kind + " " + a.ref;
+  const b = el("button", { type: "button", class: "att", title: what, "aria-label": what + ": " + a.title },
+    icon("clip"), el("span", { class: "k", text: a.kind }), el("span", { class: "t", text: a.title }));
+  artLoad(a).catch(() => { /* the click loads it again and says why it failed */ });
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const hit = artTexts.get(artHref(a)), label = b.querySelector(".t");
+    // copy first, while this is still the click; then open the text
+    const copied = hit && hit.v === a.updated && hit.text != null ? copyText(hit.text) : artLoad(a).then(copyText);
+    copied.then(() => { label.textContent = "copied"; b.classList.add("copied"); },
+                () => { label.textContent = "copy from the text"; })
+      .finally(() => setTimeout(() => { label.textContent = a.title; b.classList.remove("copied"); }, 1400));
+    view(c, a.slug + ".md", artHref(a), a);
   });
   return b;
 }
@@ -739,6 +788,7 @@ function card(c, lane) {
     const [tag, text] = eventLine(c.last_event);
     node.append(el("div", { class: "last", title: c.last_event }, tag, text));
   }
+  if ((c.artifacts || []).length) node.append(el("div", { class: "atts" }, ...c.artifacts.map((a) => artifactChip(c, a))));
   const links = el("div", { class: "links" });
   for (const p of c.prs || []) {
     const href = safeHref(p.url);
@@ -1086,19 +1136,28 @@ function tick() {
   document.getElementById("sounded").textContent = lastOk ? "sounded " + ago(new Date(lastOk).toISOString()) + " ago" : "sounding…";
 }
 
-async function view(c, f, href) {
-  const dlg = document.getElementById("viewer");
-  document.getElementById("viewer-title").textContent = (c.title || c.id) + " — " + f;
+// A task file as plain text, or an artifact (art), which also gets a copy button.
+let viewing = null; // the artifact text on show, for its copy button
+async function view(c, f, href, art) {
+  const dlg = document.getElementById("viewer"), copy = document.getElementById("viewer-copy");
+  document.getElementById("viewer-title").textContent = art ? art.title + " — " + art.kind + " · " + art.ref : (c.title || c.id) + " — " + f;
   document.getElementById("viewer-raw").href = href;
+  copy.hidden = !art; copy.textContent = "copy"; viewing = null;
   const body = document.getElementById("viewer-body");
   body.textContent = "loading…";
   if (!dlg.open) dlg.showModal();
   try {
+    if (art) { body.textContent = viewing = await artLoad(art); return; }
     const r = await fetch(href, { cache: "no-store" });
     body.textContent = r.ok ? await r.text() : "could not load " + f + " (" + r.status + ")";
   } catch (e) { body.textContent = "could not load " + f + ": " + e.message; }
 }
 document.getElementById("viewer-close").addEventListener("click", () => document.getElementById("viewer").close());
+document.getElementById("viewer-copy").addEventListener("click", (e) => {
+  const b = e.currentTarget;
+  if (viewing == null) return;
+  copyText(viewing).then(() => { b.textContent = "copied"; }, () => { b.textContent = "copy failed: select the text"; });
+});
 
 // Remembered in this browser only; storage may be blocked, so every access is guarded.
 function stored(key, allowed) { try { const v = localStorage.getItem(key); return allowed.includes(v) ? v : null; } catch (e) { return null; } }

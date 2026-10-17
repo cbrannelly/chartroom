@@ -684,8 +684,8 @@ EOF2
   [ "$(card inbox-2 | jq -c '[.short_id, .project, .title, .date]')" = '[null,"multi","untagged and undated",null]' ]
   [ "$(card api-9c1d | jq -r .project)" = billing-api ]
   [ "$(jq -c '.inbox.approvals[0] | [.project, .text, .date]' <<<"$BOARD")" = '["billing","ok to rotate the test key","2026-01-04"]' ]
-  # backward compatible: an inbox card has every key it had before, plus project
-  [ "$(card inbox-1 | jq -c 'keys - ["project"]')" = '["date","files","id","lane","last_at","prs","reason","short_id","state","title","type"]' ]
+  # backward compatible: an inbox card has every key it had before, plus project and artifacts
+  [ "$(card inbox-1 | jq -c 'keys - ["project", "artifacts"]')" = '["date","files","id","lane","last_at","prs","reason","short_id","state","title","type"]' ]
   run cr board --no-color
   grep -qE '^  21ba +\[todo-cli\] Task fix-login-21ba  \[decision\]' <<<"$output"
   grep -qE '^  9c1d +\[billing-api\] Task api-9c1d  \[blocked\]  blocked: need staging credentials$' <<<"$output"
@@ -694,4 +694,43 @@ EOF2
   grep -qE '^  - +\[multi\] untagged and undated' <<<"$output"
   # the page puts the project above the title on needs-you cards
   grep -q 'lane === "needs_you" && c.project' "$REPO_ROOT/lib/dashboard/index.html"
+}
+
+@test "artifacts: every card carries its open artifacts; the server serves their text and nothing beside it" {
+  need_python
+  fixture t-report subagent <<<"400 done: findings in report.md"
+  fixture t-plain subagent <<<"120 progress: going"
+  cat >"$CHARTROOM_HOME/inbox.md" <<'EOF2'
+# Inbox
+
+## Waiting on the commander
+- [i-7f3a] 2026-01-02 — [webapp] send the release note?
+EOF2
+  printf 'Hello,\nthe release is out.\n' >"$BATS_TEST_TMPDIR/note.md"
+  [ "$(cr artifact add t-report --kind message --title "Reply to the reviewer" "$BATS_TEST_TMPDIR/note.md")" = t-report/reply-to-the-reviewer ]
+  [ "$(cr artifact add i-7f3a --kind runbook --title "Publish" - <<<"make publish")" = i-7f3a/publish ]
+  BOARD="$(cr dashboard --json)"
+  [ "$(card t-report | jq -c '.artifacts | map([.ref, .owner_type, .owner, .slug, .kind, .title])')" = \
+    '[["t-report/reply-to-the-reviewer","task","t-report","reply-to-the-reviewer","message","Reply to the reviewer"]]' ]
+  [ "$(card t-plain | jq -c .artifacts)" = '[]' ]
+  [ "$(card inbox-0 | jq -c '.artifacts | map([.ref, .owner_type, .owner, .slug])')" = '[["i-7f3a/publish","inbox","i-7f3a","publish"]]' ]
+  [ "$(jq -c .artifacts <<<"$BOARD")" = '{"open":2,"message":1,"runbook":1,"note":0}' ]
+  start_daemon --no-gh
+  [ "$(get "$URL/task/t-report/artifacts/reply-to-the-reviewer.md")" = "$(cat "$BATS_TEST_TMPDIR/note.md")" ]
+  [ "$(get "$URL/inbox/i-7f3a/artifacts/publish.md")" = "make publish" ]
+  [[ "$(curl -sI "$URL/inbox/i-7f3a/artifacts/publish.md" | tr -d '\r')" == *"Content-Type: text/plain; charset=utf-8"* ]]
+  # the sidecar, other names and anything outside the two artifact directories are not served
+  [ "$(code "$URL/task/t-report/artifacts/reply-to-the-reviewer.json")" = 404 ]
+  [ "$(code "$URL/inbox/i-7f3a/artifacts/nope.md")" = 404 ]
+  [ "$(code "$URL/inbox/t-report/artifacts/reply-to-the-reviewer.md")" = 404 ]
+  [ "$(code "$URL/inbox/i-7f3a/meta.json")" = 404 ]
+  [ "$(code --path-as-is "$URL/task/t-report/artifacts/../meta.json")" = 404 ]
+  [ "$(code --path-as-is "$URL/inbox/i-7f3a/artifacts/../../../inbox.md")" = 404 ]
+  [ "$(code --path-as-is "$URL/task/t-report/artifacts/..%2F..%2Finbox.md")" = 404 ]
+  [ "$(code -X POST "$URL/inbox/i-7f3a/artifacts/publish.md")" = 405 ]
+  # the page: a chip per artifact that copies inside the click, then opens the text
+  local page; page="$(get "$URL/")"
+  [[ "$page" == *'class: "att"'* && "$page" == *'id="viewer-copy"'* ]]
+  grep -q 'copy first, while this is still the click' "$REPO_ROOT/lib/dashboard/index.html"
+  [ -z "$(grep -Ei '(src|href)=["'"'"']?(https?:)?//|@import|url\(https?:' <<<"$page" || true)" ]
 }

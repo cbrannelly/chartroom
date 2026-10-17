@@ -14,7 +14,8 @@ never from conversation memory. (If `chartroom` is not on PATH, use
    chartroom status --json
    ```
    Also read `$CHARTROOM_HOME/inbox.md`: questions waiting on the commander and chat
-   approvals not yet in a brief. Run `chartroom sweep` (a dry run, a few lines): its
+   approvals not yet in a brief, and `chartroom artifact list --json`: drafts still to send
+   or run. Run `chartroom sweep` (a dry run, a few lines): its
    "needs a human" lines go under **Needs you**, and its summary line under **Trouble** only
    if it found much to free (then offer `--apply`).
    For every task in `done`, `decision`, `blocked`, `failed`, `stopped-silent`,
@@ -31,6 +32,9 @@ never from conversation memory. (If `chartroom` is not on PATH, use
    `**[multi]**` for a question that spans projects, `**[chartroom]**` for one about the crew
    itself. Include every open item under "Waiting on the commander" in `inbox.md`, with the
    `[project]` its line carries (an unlabelled line: infer it from the question, else say so).
+   Every open `message` or `runbook` artifact is a line too, with its ref (the commander copies
+   it with `chartroom artifact copy <ref>`): `**[<project>]** send: <title> (<ref>)`, or
+   `run: <title> (<ref>)`. Put it on the line of the inbox item it belongs to, if any.
 
    **Ready**: finished work waiting for the commander's word (review, merge, or PR). One line
    each: the outcome, the risk, the evidence ("tests pass", "3 files"), and the full PR URL if there is one.

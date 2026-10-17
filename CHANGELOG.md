@@ -7,6 +7,22 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
+- Artifacts: drafts that outlive the chat. `chartroom artifact add <id> --kind message|runbook|note
+  --title T <file|->` keeps text the XO drafted for the commander (a message to send, commands to
+  run, a note) with a task (`tasks/<id>/artifacts/<slug>.md`, plus a `.json` with title, kind,
+  project, created, updated, done) or an open inbox item (`inbox/<i-xxxx>/artifacts/`, which
+  outlives the item's line). Refs are `<id>/<slug>` with the dashboard's short id or inbox tag
+  (the id alone when it has one open artifact); adding the same slug again overwrites. `artifact
+  list [<id>] [--all] [--json]`, `show <ref> [--path]`, `copy <ref>` (`CHARTROOM_CLIPBOARD`, else
+  `pbcopy`, `wl-copy`, `xclip`, `xsel`, else it prints) and `done <ref>`. Dashboard cards (task and
+  inbox) show a chip per open artifact that copies the text and opens it in one click, and the
+  server serves `/task/<id>/artifacts/<slug>.md` and `/inbox/<i-xxxx>/artifacts/<slug>.md`
+  (read-only, the `.md` only). The lanes JSON gains `artifacts` on every card (`[]` when none) and
+  a top-level `artifacts` count by kind; nothing else in it changes. `board` prints an item's
+  artifact refs on its line, and `board` and `status` end with a count. The chartroom skill has
+  the XO save whatever it drafts for the commander to send or run as an artifact and give the
+  ref, never the text in chat alone; `bearings` lists open messages and runbooks under Needs
+  you, and `continue` names an item's artifacts.
 - `chartroom sweep`, and a `sweep` skill (linked by `install-skills`): an audit of what the crew
   left running, and with `--apply` freeing the safe part of it. It finds sessions of finished
   tasks, done tasks safe to close (worktree clean, every commit in the base ref), orphaned
@@ -199,6 +215,8 @@ are stable from 0.1.0.
   runs under, what it was re-run from, and a thin PATH (`bash` and `path` in `--json`).
   `install.sh` applies the same search. The `join` skill's hooks read the session id with `sed`
   instead of `jq`, since they run in the launching shell before chartroom can fix its PATH.
+- Short ids no longer fail under `nullglob` in a home with no tasks (a latent bug the artifact
+  commands hit first).
 
 ### Changed
 - README reads on its own: the comparison with another project is gone; the differences that

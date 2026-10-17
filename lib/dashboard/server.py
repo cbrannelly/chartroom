@@ -8,6 +8,8 @@ first use): `?token=` once, then an HttpOnly cookie. --no-token turns that off. 
   /                     the page (index.html next to this file, read per request; inline CSS/JS, no CDNs)
   /api/dashboard        `chartroom dashboard --json`, cached for a few seconds
   /task/<id>/<file>     a task's brief/report/plan/final/events as plain text
+  /task/<id>/artifacts/<slug>.md, /inbox/<i-xxxx>/artifacts/<slug>.md
+                        an artifact's text (a draft for the commander), as plain text
   /healthz              "ok"
 Lane logic lives in the CLI (lib/dashboard.sh + lanes.jq), never here. The optional gh
 enrichment only looks up the state of PR links already found in task files.
@@ -41,6 +43,8 @@ CACHE_SECONDS = 3
 GH_REFRESH_SECONDS = 300
 TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 TASK_FILES = ("brief.md", "report.md", "plan.md", "final.md", "events.log")
+INBOX_TAG = re.compile(r"^i-[0-9a-f]{4,16}$")
+ARTIFACT_FILE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}\.md$")
 GITHUB_PR = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/[0-9]+$")
 HERE = os.path.dirname(os.path.abspath(__file__))
 THEMES = ("chartroom", "hud")  # the page's themes; lib/dashboard.sh validates against the same list
@@ -290,11 +294,15 @@ def make_handler(board, port, page, host, use_token, home):
                 except Exception as exc:  # surfaced on the page, not swallowed
                     return self.send(500, json.dumps({"error": str(exc)}), "application/json")
             parts = path.split("/")
+            f = None
             if len(parts) == 4 and parts[1] == "task" and TASK_ID.match(parts[2]) and parts[3] in TASK_FILES:
                 f = os.path.join(board.home, "tasks", parts[2], parts[3])
-                if os.path.isfile(f):
-                    with open(f, "rb") as fh:
-                        return self.send(200, fh.read(), "text/plain; charset=utf-8")
+            elif (len(parts) == 5 and parts[3] == "artifacts" and ARTIFACT_FILE.match(parts[4])
+                  and ((parts[1] == "task" and TASK_ID.match(parts[2])) or (parts[1] == "inbox" and INBOX_TAG.match(parts[2])))):
+                f = os.path.join(board.home, "tasks" if parts[1] == "task" else "inbox", parts[2], "artifacts", parts[4])
+            if f and os.path.isfile(f):
+                with open(f, "rb") as fh:
+                    return self.send(200, fh.read(), "text/plain; charset=utf-8")
             return self.send(404, "not found\n", "text/plain; charset=utf-8")
 
         def do_POST(self):
