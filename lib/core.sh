@@ -298,7 +298,7 @@ waiting_info() { # <id>
 # is every task, so no two short ids are ever equal. Prints {"<id>": "<short>", ...}.
 short_ids_json() {
   local metas=("$CR_HOME"/tasks/*/meta.json)
-  [[ -e "${metas[0]}" ]] || { echo '{}'; return 0; }
+  [[ -e "${metas[0]-}" ]] || { echo '{}'; return 0; } # (empty under nullglob)
   jq -n -c '
     def short($pool): . as $id
       | if ($id | test("-[0-9a-f]{4}$") | not) then $id else
