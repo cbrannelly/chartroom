@@ -260,7 +260,8 @@ How it is built, and what it promises:
   your own `gh` login. `--no-gh` turns it off; without `gh`, or offline, the page just shows the
   links.
 - `--daemon` writes `.dashboard.pid` (pid and port) and `.dashboard.log` in the home. One
-  dashboard per home; `--port 0` picks a free port.
+  dashboard per home; `--port 0` picks a free port. The page is read on each load, so after an
+  update a reload shows the new page without restarting the server.
 - `dashboard open` reuses this home's dashboard if it answers on its port; otherwise it
   replaces a stale pid file (or a server that stopped answering), starts one with `--daemon`
   and waits for it. Then it opens the URL with `CHARTROOM_OPENER`, else `open` (macOS) or

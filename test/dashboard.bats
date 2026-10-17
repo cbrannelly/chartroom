@@ -488,6 +488,30 @@ start_exposed() {
   [ "$status" -eq 1 ]; [[ "$output" == *"--theme needs a value"* ]]
 }
 
+@test "server: a running dashboard serves the page as installed now, so an update shows without a restart" {
+  need_python
+  # an install of its own, so the test can update the page under the running server
+  local root="$BATS_TEST_TMPDIR/install" page
+  mkdir -p "$root"
+  cp -R "$REPO_ROOT/bin" "$REPO_ROOT/lib" "$REPO_ROOT/templates" "$REPO_ROOT/VERSION" "$root/"
+  page="$root/lib/dashboard/index.html"
+  CHARTROOM="$root/bin/chartroom"
+  start_daemon --no-gh --theme hud
+  [[ "$(get "$URL/")" == *"<title>chartroom</title>"* ]]
+  # an update (install.sh fast-forwards the checkout) rewrites the page; the next load serves
+  # it, with the server's default theme still written in
+  sed 's|<title>chartroom</title>|<title>chartroom updated</title>|' "$REPO_ROOT/lib/dashboard/index.html" >"$page"
+  local p; p="$(get "$URL/")"
+  [[ "$p" == *"<title>chartroom updated</title>"* ]]
+  [ "$(grep -c '<html lang="en" data-theme="hud">' <<<"$p")" -eq 1 ]
+  # a page caught half-written, or gone mid-replace, keeps the last good one
+  head -c 2000 "$REPO_ROOT/lib/dashboard/index.html" >"$page"
+  [[ "$(get "$URL/")" == *"<title>chartroom updated</title>"* ]]
+  rm -f "$page"
+  [ "$(code "$URL/")" = 200 ]
+  [[ "$(get "$URL/")" == *"<title>chartroom updated</title>"* ]]
+}
+
 @test "server: a stale pid file never makes stop signal an unrelated process" {
   sleep 60 &
   local other=$!

@@ -168,6 +168,12 @@ are stable from 0.1.0.
   (768px), lane-count labels wrap instead of being cut, no text is under 12px below 1100px,
   every control is a 44px tap target on touch screens, and a card's last event shows up to
   three lines on a phone instead of one cut line.
+- A running dashboard shows an updated page. The server read `index.html` once, at start, so
+  after `install.sh` updated chartroom it kept serving the old page until restarted; a dashboard
+  started before the "every question carries its project" change still showed Needs you inbox
+  cards with no project. It now reads the page on each load (keeping the last good one if the
+  file is missing or half-written mid-update). A dashboard already running needs one restart to
+  pick this up.
 - `steer` to a Claude session worker (tmux, cmux, herdr) no longer says `delivered` when only a
   fragment of the message was submitted. The UserPromptSubmit hook now records a signature of
   the submitted prompt (`agent: prompt-received sig=<12 hex> len=<n>`) and delivery is confirmed

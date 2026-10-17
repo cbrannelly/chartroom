@@ -5,7 +5,7 @@ Started by `chartroom dashboard`; do not run it by hand. It binds 127.0.0.1 unle
 names another IPv4 address (0.0.0.0 is every interface). Bound beyond loopback, every request
 but /healthz needs the access token in $CHARTROOM_HOME/.dashboard.token (made here, 0600, on
 first use): `?token=` once, then an HttpOnly cookie. --no-token turns that off. It serves:
-  /                     the page (index.html next to this file; inline CSS/JS, no CDNs)
+  /                     the page (index.html next to this file, read per request; inline CSS/JS, no CDNs)
   /api/dashboard        `chartroom dashboard --json`, cached for a few seconds
   /task/<id>/<file>     a task's brief/report/plan/final/events as plain text
   /healthz              "ok"
@@ -117,6 +117,34 @@ class Board:
                 self.cached = None
             self.gh_wake.wait(GH_REFRESH_SECONDS)
             self.gh_wake.clear()
+
+
+class Page:
+    """index.html as it is on disk now, read per request: an update (install.sh fast-forwards
+    the checkout) shows on the next load, not only after the server restarts. A read that
+    fails or looks half-written keeps the last good page."""
+
+    def __init__(self, path, theme):
+        self.path, self.theme = path, theme
+        self.good = self.load()
+
+    def load(self):
+        with open(self.path, "rb") as fh:
+            page = fh.read()
+        # The default theme is written into the page, so it renders without a flash; a
+        # browser's own choice from the page's switcher still wins.
+        if page.count(THEME_SLOT) != 1:
+            raise ValueError("index.html has no single theme slot %r" % THEME_SLOT.decode())
+        if not page.rstrip().endswith(b"</html>"):
+            raise ValueError("index.html is incomplete (no closing </html>)")
+        return page.replace(THEME_SLOT, THEME_SLOT.replace(b'"chartroom"', b'"%s"' % self.theme.encode()))
+
+    def get(self):
+        try:
+            self.good = self.load()
+        except (OSError, ValueError):
+            pass
+        return self.good
 
 
 def is_loopback(host):
@@ -255,7 +283,7 @@ def make_handler(board, port, page, host, use_token, home):
                 if host_hdr is not None and host_hdr not in allowed_hosts:
                     return self.send(403, "forbidden host\n", "text/plain; charset=utf-8")
             if path in ("/", "/index.html"):
-                return self.send(200, page, "text/html; charset=utf-8")
+                return self.send(200, page.get(), "text/html; charset=utf-8")
             if path == "/api/dashboard":
                 try:
                     return self.send(200, board.get(), "application/json")
@@ -317,13 +345,10 @@ def main():
     token = load_token(home, create=True) if use_token else None
     if use_token and not token:
         sys.exit("chartroom dashboard: cannot read or create the access token %s" % os.path.join(home, TOKEN_FILE))
-    with open(os.path.join(HERE, "index.html"), "rb") as fh:
-        page = fh.read()
-    # The default theme is written into the page once, so it renders without a flash; a
-    # browser's own choice from the page's switcher still wins.
-    if page.count(THEME_SLOT) != 1:
-        sys.exit("chartroom dashboard: index.html has no single theme slot %r" % THEME_SLOT.decode())
-    page = page.replace(THEME_SLOT, THEME_SLOT.replace(b'"chartroom"', b'"%s"' % args.theme.encode()))
+    try:
+        page = Page(os.path.join(HERE, "index.html"), args.theme)
+    except (OSError, ValueError) as exc:
+        sys.exit("chartroom dashboard: %s" % exc)
     board = Board(args.bin, home, not args.no_gh, args.bash)
     try:
         httpd = Server((args.host, args.port), None)
