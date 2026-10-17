@@ -37,9 +37,14 @@ dispatched_task() {
   [ "$(jq -c .attach <<<"$detail")" = "{\"where\":\"herdr tab w1:t2\",\"command\":\"chartroom attach $id\"}" ]
   [ "$(jq -r .worktree <<<"$detail")" = /srv/wt/fix-login ]
   [ "$(jq -c .artifacts <<<"$detail")" = '[]' ]
+  # an open artifact comes through with the board's ref, which `artifact show` takes
+  printf 'Thanks for the review.\n' | cr artifact add "$short" --kind message --title "Reply to review" - >/dev/null
+  detail="$(cr show "$short" --json)"
+  [ "$(jq -c '[.artifacts[] | [.ref, .title, .kind]]' <<<"$detail")" = "[[\"$short/reply-to-review\",\"Reply to review\",\"message\"]]" ]
+  [ "$(cr artifact show "$(jq -r '.artifacts[0].ref' <<<"$detail")")" = "Thanks for the review." ]
   # it only adds to the card: every field the board has, with the board's values
-  [ "$(jq -c 'del(.intent, .events, .outcome, .report, .brief, .worktree, .branch, .attach, .artifacts)' <<<"$detail")" = \
-    "$(cr board --json | jq -c --arg id "$id" '.lanes[][] | select(.id == $id) | del(.artifacts)')" ]
+  [ "$(jq -c 'del(.intent, .events, .outcome, .report, .brief, .worktree, .branch, .attach)' <<<"$detail")" = \
+    "$(cr board --json | jq -c --arg id "$id" '.lanes[][] | select(.id == $id)')" ]
   # the same through the full id, and as text
   [ "$(cr show "$id" --json | jq -r .id)" = "$id" ]
   run cr show "$short"
