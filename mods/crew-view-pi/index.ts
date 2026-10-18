@@ -337,7 +337,7 @@ export default function crewView(pi: ExtensionAPI) {
       const th = this.theme
       const dim = (t: string) => truncateToWidth(th.fg('dim', t), width)
       // Every view's first line says how to close the browser.
-      const head = (hint: string) => truncateToWidth(`${th.fg('accent', 'q')}${th.fg('dim', `: close  · ${hint}`)}`, width)
+      const head = (hint: string) => truncateToWidth(`${th.fg('accent', 'q')}${th.fg('dim', `: close · ${hint}`)}`, width)
       if (this.view === 'report' && this.report) {
         return [head(`b or Esc back · ${this.detail?.report?.path ?? ''}`), ...this.report.render(width)]
       }
