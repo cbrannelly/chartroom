@@ -45,6 +45,11 @@ test('q closes the pane from the detail; the next open starts on the lanes, the 
   expect(await ui.find({ key: 'row-108a' })).toBeDefined()
   expect((await ui.find({ key: 'row-108a' }))?.props.autoFocus).toBe(true)
   expect((await ui.find({ key: 'row-4d10' }))?.props.autoFocus).toBeUndefined()
+  // Closed from another item, the ring starts on that row next time.
+  await ui.press({ key: 'row-4d10' })
+  await ui.press({ key: 'act-close' })
+  expect((await ui.find({ key: 'row-4d10' }))?.props.autoFocus).toBe(true)
+  expect((await ui.find({ key: 'row-108a' }))?.props.autoFocus).toBeUndefined()
 })
 
 test('/crew toggles the pane; /crew <id> always opens', async ($, on) => {
