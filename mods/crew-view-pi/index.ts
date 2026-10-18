@@ -12,6 +12,7 @@
 // and `/crew [id]`, a browser of the lanes (up/down, Enter) with an item's detail
 // (`chartroom show <id> --json`) and its actions: c continue (`/skill:continue <id>` into the
 // editor), y copy the id, p copy a PR, r read the report, a copy an artifact, b back, q close.
+// `/crew off` hides the band for the session, `/crew on` brings it back.
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 
 import { copyToClipboard, getMarkdownTheme } from '@earendil-works/pi-coding-agent'
@@ -27,6 +28,7 @@ const POLL_MS = 15_000
 const XO_SKILLS = /^\/skill:(captain|chartroom)(\s|$)/
 const XO_SKILL_FILE = /(^|[\\/])(captain|chartroom)[\\/]SKILL\.md$/
 const ENTRY = 'chartroom-crew-view'
+const BAND_ENTRY = 'chartroom-crew-view-band'
 const WIDGET = 'chartroom-crew'
 
 /** The chartroom home when this session is the XO's; reads env and files only, never runs a process. */
@@ -68,6 +70,9 @@ export default function crewView(pi: ExtensionAPI) {
   let error: string | null = null
   let timer: ReturnType<typeof setInterval> | undefined
   let polling = false
+  // `/crew off`: no band (and no poll while the browser is closed) until `/crew on`.
+  let bandOff = false
+  let browserOpen = false
   // Redraws whatever shows the board: the band's TUI, and the browser while it is open.
   const redraws = new Set<() => void>()
   const redraw = () => redraws.forEach(fn => fn())
@@ -133,32 +138,48 @@ export default function crewView(pi: ExtensionAPI) {
     })
   }
 
+  /** `/crew off` and `/crew on`; a session entry keeps the choice across /reload. */
+  function setBand(ctx: ExtensionContext, off: boolean) {
+    bandOff = off
+    pi.appendEntry(BAND_ENTRY, { off })
+    if (off) return ctx.ui.setWidget(WIDGET, undefined)
+    showBand(ctx)
+    void poll()
+  }
+
   /** Wakes once per runtime: registers /crew, draws the band, starts the poll. */
   function wake(ctx: ExtensionContext, record: boolean) {
     if (awake || !xoHome) return
     awake = true
     if (record) pi.appendEntry(ENTRY, { active: true })
     pi.registerCommand('crew', {
-      description: "Browse chartroom's crew: needs you, running, on hold, landed, failed",
+      description: "Browse chartroom's crew (q closes); /crew <id> opens an item, /crew off hides the band",
       handler: async (args, cmdCtx) => {
+        const arg = args.trim().replace(/^\[|\]$/g, '')
+        if (arg === 'off' || arg === 'on') {
+          setBand(cmdCtx, arg === 'off')
+          return cmdCtx.ui.notify(arg === 'off' ? 'Crew band off for this session: /crew on brings it back; /crew still opens the browser.' : 'Crew band on.', 'info')
+        }
         void poll()
-        await openBrowser(cmdCtx, args.trim().replace(/^\[|\]$/g, ''))
+        await openBrowser(cmdCtx, arg)
       },
     })
     // The editor's slash-command list is built when its autocomplete provider is: adding one
     // (that changes nothing) rebuilds it, so a /crew registered after startup is offered too.
     ctx.ui.addAutocompleteProvider(current => current)
-    showBand(ctx)
+    if (!bandOff) showBand(ctx)
     void poll()
-    timer = setInterval(() => void poll(), POLL_MS)
+    // Nothing shows the board with the band off and the browser closed: no read then.
+    timer = setInterval(() => void (!bandOff || browserOpen ? poll() : undefined), POLL_MS)
   }
 
   pi.on('session_start', (_e, ctx) => {
     xoHome = detectXo(ctx)
     if (!xoHome) return
-    // /reload, a resumed session: the skill was loaded here before.
-    const loaded = ctx.sessionManager.getBranch().some(entry => entry.type === 'custom' && (entry as { customType?: string }).customType === ENTRY)
-    if (loaded) wake(ctx, false)
+    // /reload, a resumed session: the skill was loaded here before, the band maybe turned off.
+    const custom = ctx.sessionManager.getBranch().flatMap(entry => (entry.type === 'custom' ? [entry as { customType?: string; data?: unknown }] : []))
+    bandOff = (custom.filter(entry => entry.customType === BAND_ENTRY).at(-1)?.data as { off?: boolean } | undefined)?.off === true
+    if (custom.some(entry => entry.customType === ENTRY)) wake(ctx, false)
   })
 
   pi.on('input', (e, ctx) => {
@@ -183,12 +204,17 @@ export default function crewView(pi: ExtensionAPI) {
    * when the editor holds a draft, keeps the draft and copies the line.
    */
   async function openBrowser(ctx: ExtensionContext, initial: string) {
-    const line = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-      const browser = new Browser(tui, theme, done)
-      redraws.add(browser.refresh)
-      if (initial) void browser.open(initial)
-      return browser
-    })
+    browserOpen = true
+    const line = await ctx.ui
+      .custom<string | null>((tui, theme, _kb, done) => {
+        const browser = new Browser(tui, theme, done)
+        redraws.add(browser.refresh)
+        if (initial) void browser.open(initial)
+        return browser
+      })
+      .finally(() => {
+        browserOpen = false
+      })
     if (!line) return
     if (ctx.ui.getEditorText().trim() === '') return ctx.ui.setEditorText(line)
     await copyToClipboard(line).then(
@@ -281,7 +307,8 @@ export default function crewView(pi: ExtensionAPI) {
 
     handleInput(data: string) {
       if (this.view === 'report') {
-        if (matchesKey(data, 'escape') || data === 'b' || data === 'q') {
+        if (data === 'q') return this.close()
+        if (matchesKey(data, 'escape') || data === 'b') {
           this.view = 'detail'
           this.refresh()
         }
@@ -309,8 +336,10 @@ export default function crewView(pi: ExtensionAPI) {
     render(width: number): string[] {
       const th = this.theme
       const dim = (t: string) => truncateToWidth(th.fg('dim', t), width)
+      // Every view's first line says how to close the browser.
+      const head = (hint: string) => truncateToWidth(`${th.fg('accent', 'q')}${th.fg('dim', `: close  · ${hint}`)}`, width)
       if (this.view === 'report' && this.report) {
-        return [dim(`b back · ${this.detail?.report?.path ?? ''}`), ...this.report.render(width)]
+        return [head(`b or Esc back · ${this.detail?.report?.path ?? ''}`), ...this.report.render(width)]
       }
       if (this.view === 'detail' && this.selected) {
         const d = this.detail
@@ -318,10 +347,11 @@ export default function crewView(pi: ExtensionAPI) {
           .map(a => `${th.fg('accent', a.hotkey)}: ${a.label}`)
           .join('  ')
         const lines = d ? detailLines(d, width, Date.now()).map(l => paint(th, l, width)) : [dim(`${this.selected} · ${this.detailError ?? 'reading…'}`)]
-        return [...lines.slice(0, 2), truncateToWidth(`${actions}  ${th.fg('dim', 'q close')}`, width), ...(this.notice ? [truncateToWidth(th.fg('success', this.notice), width)] : []), ...lines.slice(2), ...(d && this.detailError ? [dim(`last read: ${this.detailError}`)] : [])]
+        return [head('Esc or b back to the lanes'), ...lines.slice(0, 2), truncateToWidth(actions, width), ...(this.notice ? [truncateToWidth(th.fg('success', this.notice), width)] : []), ...lines.slice(2), ...(d && this.detailError ? [dim(`last read: ${this.detailError}`)] : [])]
       }
-      if (!board) return [dim(error ?? 'Reading the board…')]
-      const lines: string[] = []
+      const listHead = head('Esc closes too · /crew off hides the band')
+      if (!board) return [listHead, dim(error ?? 'Reading the board…')]
+      const lines: string[] = [listHead]
       let n = 0
       const all = paneLines(board, width, Date.now())
       this.cursor = Math.min(this.cursor, Math.max(0, all.filter(l => l.ref).length - 1))
@@ -329,7 +359,7 @@ export default function crewView(pi: ExtensionAPI) {
         const here = line.ref !== undefined && n++ === this.cursor
         lines.push(here ? truncateToWidth(th.inverse(line.text), width) : paint(th, line, width))
       }
-      lines.push(dim(`updated ${board.generated_at.slice(11, 19) || '?'}Z${error ? ` · last poll: ${error}` : ''} · ↑↓ move, Enter opens, q closes`))
+      lines.push(dim(`updated ${board.generated_at.slice(11, 19) || '?'}Z${error ? ` · last poll: ${error}` : ''} · ↑↓ move, Enter opens`))
       return lines
     }
 
