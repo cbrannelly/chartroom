@@ -373,8 +373,13 @@ export const register: Register = on => {
         {note}
       </Text>
     ) : null
-    // Every view's first row says how to close the pane; `q` presses it.
-    const closeButton = <Button key="act-close" plain hotkey="q" label="close" role="dismiss" onPress={() => void closePane($)} />
+    // Every view's first row says how to close the pane; `q` presses it. The buttons keep
+    // their width: the row's text is what gives way.
+    const closeButton = (
+      <Box flexShrink={0}>
+        <Button key="act-close" plain hotkey="q" label="close" role="dismiss" onPress={() => void closePane($)} />
+      </Box>
+    )
     const head = (hint: string) => (
       <Box key="head" flexDirection="row">
         {closeButton}
@@ -390,7 +395,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Box key="head" flexDirection="row">
-            <Box marginRight={2}>
+            <Box flexShrink={0} marginRight={2}>
               <Button key="act-back" plain autoFocus hotkey="b" label="back" onPress={() => void back($)} />
             </Box>
             {closeButton}
