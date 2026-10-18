@@ -24,7 +24,6 @@ are stable from 0.1.0.
   the XO save whatever it drafts for the commander to send or run as an artifact and give the
   ref, never the text in chat alone; `bearings` lists open messages and runbooks under Needs
   you, and `continue` names an item's artifacts.
-||||||| parent of 2a25b8a (docs: the item browser, chartroom show and the pi crew view)
 - `chartroom show <id> [--json]`: one item in detail, by any id `resolve` takes (a short id, an
   inbox tag, a full id). The board's card for it, plus what only the task's files say: the
   first lines of the commander's intent, the last five worker events, the outcome (the newest
@@ -42,6 +41,13 @@ are stable from 0.1.0.
   `y` copies the id, `p` a PR URL, `a` an artifact's text, `r` reads the report in the pane,
   `b` goes back. `/crew <id>` opens an item directly. The band, the XO-only scope and the
   inert-until-the-skill-loads behaviour are unchanged.
+- crew-view 0.3.0: the `/crew` pane closes. Every view's first row reads `q: close`; `q` or Esc
+  closes it from any view (Esc also from an idle, empty prompt, where it used to only hand the
+  keys back), bare `/crew` toggles it, and a closed pane opens next on the lanes with the ring on
+  the row last opened. `/crew off` hides the band (and closes the pane) for the session, and
+  `/crew on` brings it back; the 15 s board read rests while neither shows. The pi crew view
+  gains the same header, `q` closing from every view, and `/crew off`/`/crew on`, kept across
+  `/reload`.
 - `mods/crew-view-pi`, the same band and browser for pi (0.87 or newer), gated the same way
   (`/skill:captain` or `/skill:chartroom`, or the model reading either skill, in the XO's
   session in the chartroom home); `c` puts `/skill:continue <id>` in the editor. It shares the

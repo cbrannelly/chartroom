@@ -11,8 +11,10 @@ for Claude Code: chartroom's crew, live inside the XO's pi session.
   ```
 
 - **`/crew`, a browser of the items.** It takes over the editor's place until you close it:
-  the board's lanes, ↑/↓ (or `j`/`k`) to move, Enter to open an item, `q` or Esc to close.
-  `/crew <id>` opens that item straight away. An item shows its state, the commander's intent,
+  the board's lanes, ↑/↓ (or `j`/`k`) to move, Enter to open an item. Every view's first line
+  reads `q: close`: `q` closes the browser from any view, and Esc closes it from the lanes (from
+  an item or its report, Esc steps back). `/crew <id>` opens that item straight away. While the
+  browser is open it holds the keyboard, so `/crew` always opens it; `q` is the close. An item shows its state, the commander's intent,
   the last events, the report's summary or the outcome, PRs, artifacts and where the worker
   runs, with the same one-letter actions as the Claude Code pane:
 
@@ -21,10 +23,14 @@ for Claude Code: chartroom's crew, live inside the XO's pi session.
   | `c` | continue: closes the browser and puts `/skill:continue <id>` (pi's spelling of `/continue`) in an empty editor; a draft is kept and the line copied instead |
   | `y` | copy the short id |
   | `p` | copy the first PR URL |
-  | `r` | read the report, rendered as markdown (`b` or Esc comes back) |
+  | `r` | read the report, rendered as markdown (`b` or Esc comes back, `q` closes) |
   | `a` | copy the first artifact's text (`chartroom artifact show <ref>`), once the CLI has artifacts |
   | `b`, Esc | back to the lanes |
   | `q` | close the browser |
+
+- **`/crew off`** hides the band for the rest of the session and **`/crew on`** brings it back;
+  a session entry keeps the choice across `/reload`. `/crew` still opens the browser. While the
+  band is off and the browser closed, nothing reads the board.
 
 It reads `chartroom board --json` (chartroom on PATH, else `~/.local/bin/chartroom`) when it
 wakes and every 15 seconds after, and `chartroom show <id> --json` when an item opens. The lane,

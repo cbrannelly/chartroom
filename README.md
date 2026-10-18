@@ -87,7 +87,8 @@ browses the board's items, the dashboard inside Claude Code. Tab or the arrows w
 Enter opens one: its state, the commander's intent, the last events, the report's summary or the
 outcome, PRs, artifacts and where the worker runs. From there, `c` puts `/continue <id>` in the
 prompt (Enter runs it), `y` copies the id, `p` a PR URL, `a` an artifact, `r` reads the report,
-`b` goes back; `/crew <id>` opens an item directly. It polls `chartroom board --json` every 15
+`b` goes back; `/crew <id>` opens an item directly. `q` or Esc closes the pane, `/crew` toggles
+it, and `/crew off` hides the band for the session. It polls `chartroom board --json` every 15
 seconds and reads an item with `chartroom show <id> --json`. Install it at user scope:
 
 ```

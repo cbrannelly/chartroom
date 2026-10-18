@@ -25,12 +25,19 @@ live inside the XO's session:
 - **A `/crew` pane that browses the items**, the web dashboard's equivalent inside Claude Code.
   It leads with the emoji legend, then the board's lanes (needs you, running, on hold, landed,
   failed), one row per item: `[project] short_id title state age-of-last-event`, sized to the
-  pane. `/crew` opens it with the keyboard: Tab or the arrows walk the rows, Enter opens one,
-  Esc hands the keys back to the prompt. `/crew <id>` opens that item straight away.
+  pane. `/crew` opens it with the keyboard: Tab or the arrows walk the rows, Enter opens one.
+  `/crew <id>` opens that item straight away.
+
+  Every view's first row reads `q: close`. `q` or Esc closes the pane from any view, and so does
+  Esc at an idle, empty prompt once the keys are back there. `/crew` toggles the pane, and a
+  closed pane opens next on the lanes. `/crew off` hides the band, and closes the pane, for the
+  rest of the session (`/crew` still opens the pane); `/crew on` brings the band back. While the
+  band is off and the pane closed, nothing reads the board.
 
   An item opens into its detail:
 
   ```
+  q: close  Esc closes too · b back to the lanes
   108a  [shop] Auth project-manager
   🙋 decision · needs you · live running · herdr:claude
   c: continue  y: copy id  p: copy PR  r: report  a: copy artifact  b: back
@@ -57,10 +64,11 @@ live inside the XO's session:
   | `p` | copy the (first) PR URL; Enter on a PR line copies that one |
   | `r` | read the report in the pane, rendered as markdown (`b` comes back) |
   | `a` | copy the (first) open artifact's text (`chartroom artifact show <ref>`); Enter on an artifact line copies that one |
-  | `b` | back to the lanes |
+  | `b` | back to the lanes (from the report, back to the item) |
+  | `q`, Esc | close the pane |
 
   The line under the actions says what the last one did (copied, in the prompt, or why not).
-  There are no write actions beyond these: nothing merges, steers or closes from the pane.
+  There are no write actions beyond these: nothing merges, steers or closes a task from the pane.
 
 It reads `chartroom board --json` (chartroom on PATH, else `~/.local/bin/chartroom`) when it
 wakes, every 15 seconds after, and whenever the pane opens; `chartroom show <id> --json` when an
@@ -78,6 +86,14 @@ The mod does not submit `/continue` itself (`$.command.run` could): you see the 
 Enter. Copying goes through `$.ui.copy` (the terminal's clipboard tool, or OSC 52); the tests
 check what is copied, not a terminal's clipboard. By the API's own rules a pane opened from the
 band's `[ crew ]` button does not take the keyboard (the band holds it); `/crew` does.
+
+Closing, checked live on the same build: a Button with `hotkey="q"` and `role="dismiss"` calls
+`$.ui.close`; the pane opens with `closeOnEscape`, so Esc closes it from the pane, and from an idle,
+empty prompt after typing handed the keys back; `autoFocus` puts the ring on the first row
+instead of on `q: close` (and, in the test kit, on the row last opened). In the test kit, the mod's own `$.ui.close` does not
+reach its own `ui.close` hook, so `q` and `/crew` reset the pane themselves and the hook handles
+the person's closes. The frame's close mark (`✕`, a mouse click) is the person's close too; it
+was not clicked in the live check.
 
 ## XO only, once the skill is loaded
 
