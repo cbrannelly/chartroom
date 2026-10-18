@@ -10,7 +10,8 @@
 // The /crew pane browses the board: each item is a Button (Tab or the arrows walk them, Enter
 // opens one), and an item opens into its detail (`chartroom show <id> --json`) with actions
 // on one-letter hotkeys: continue (`/continue <id>` into the prompt), copy the id or a PR,
-// read the report, copy an artifact, back.
+// read the report, copy an artifact, back. `q` or Esc closes the pane, `/crew` toggles it,
+// and `/crew off` hides the band for the session (`/crew on` brings it back).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
@@ -33,6 +34,7 @@ const detail = atom({ plugin: 'crew-view', key: 'detail' } as const, null as Cre
 const detailError = atom({ plugin: 'crew-view', key: 'detailError' } as const, null as string | null)
 const report = atom({ plugin: 'crew-view', key: 'report' } as const, null as { path: string; text: string } | null)
 const notice = atom({ plugin: 'crew-view', key: 'notice' } as const, null as string | null)
+const bandOff = atom({ plugin: 'crew-view', key: 'bandOff' } as const, false)
 
 const COLOR: Record<Tone, { color?: string; dimColor?: boolean }> = {
   plain: {},
@@ -233,7 +235,32 @@ async function act($: EngineInterface, id: ActionId, surface?: RenderSurface) {
 
 async function openPane($: EngineInterface) {
   void poll($)
-  return $.ui.open({ id: PANE, title: 'Crew', focus: true })
+  // Esc closes it, from the pane or from an idle, empty prompt, as `q` and `/crew` do.
+  return $.ui.open({ id: PANE, title: 'Crew', focus: true, closeOnEscape: true })
+}
+
+/** True while the pane is open, shown or behind another pane's tab. */
+async function isOpen($: EngineInterface, shownOnly = false): Promise<boolean> {
+  const panes = await $.ui.panes().catch(() => [])
+  return panes.some(p => p.id === PANE && (!shownOnly || p.isShown))
+}
+
+/** A closed pane opens next on the lanes. */
+async function rest($: EngineInterface) {
+  await update($, view, () => 'list')
+  await update($, notice, () => null)
+}
+
+/** Closes the pane. The plugin's own close passes beneath its ui.close hook: it rests here. */
+async function closePane($: EngineInterface) {
+  await $.ui.close({ id: PANE }).catch(() => {})
+  await rest($)
+}
+
+/** The timer's poll; skipped while nothing shows the board (the band off, the pane closed). */
+async function tick($: EngineInterface) {
+  if ((await read($, bandOff).catch(() => false)) && !(await isOpen($))) return
+  await poll($)
 }
 
 /** True when this is the XO's session and it has loaded the captain or chartroom skill. */
@@ -245,9 +272,9 @@ async function isActive($: EngineInterface): Promise<boolean> {
 async function start($: EngineInterface): Promise<void> {
   if (started) return
   started = true
-  await $.command.register({ name: 'crew', description: "Show chartroom's crew: needs you, running, on hold, landed, failed" })
+  await $.command.register({ name: 'crew', description: "Toggle chartroom's crew pane; /crew <id> opens an item, /crew off hides the band" })
   void poll($)
-  $.clock.every(POLL_MS, () => void poll($))
+  $.clock.every(POLL_MS, () => void tick($))
 }
 
 export const register: Register = on => {
@@ -272,16 +299,39 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // /crew exists only once start() registered it. `/crew <id>` opens that item.
+  // /crew exists only once start() registered it. Bare, it toggles the pane; `/crew <id>`
+  // opens that item; `/crew off` hides the band (and the pane) for the session, `/crew on`
+  // brings the band back.
   on('command.run', { command: 'crew' }, async ($, e) => {
     const ref = e.args.trim().replace(/^\[|\]$/g, '')
+    if (ref === 'off') {
+      await update($, bandOff, () => true)
+      await closePane($)
+      return { text: 'Crew band off for this session: /crew on brings it back; /crew still opens the pane.' }
+    }
+    if (ref === 'on') {
+      await update($, bandOff, () => false)
+      void poll($)
+      return { text: 'Crew band on.' }
+    }
     if (ref) void openItem($, ref)
+    else if (await isOpen($, true)) {
+      await closePane($)
+      return { text: 'Crew pane closed.' }
+    }
     const opened = await openPane($)
     return { text: opened.isPlaced ? 'Crew pane opened.' : 'Crew pane is waiting for room: widen the terminal.' }
   })
 
+  // The person's close (Esc, the close mark) rests the pane as closePane does.
+  on('ui.close', async ($, e, next) => {
+    const closed = await next(e)
+    if (e.id === PANE) await rest($)
+    return closed
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || !(await isActive($))) return next(e)
+    if (e.props.hasSurvey || !(await isActive($)) || (await read($, bandOff))) return next(e)
     const b = await read($, board)
     const err = await read($, error)
     if (!b && !err) return next(e)
@@ -323,13 +373,27 @@ export const register: Register = on => {
         {note}
       </Text>
     ) : null
+    // Every view's first row says how to close the pane; `q` presses it.
+    const closeButton = <Button key="act-close" plain hotkey="q" label="close" role="dismiss" onPress={() => void closePane($)} />
+    const head = (hint: string) => (
+      <Box key="head" flexDirection="row">
+        {closeButton}
+        <Text dimColor wrap="truncate">
+          {'  '}
+          {hint}
+        </Text>
+      </Box>
+    )
 
     if (shown === 'report' && ref) {
       const r = await read($, report)
       return (
         <Box flexDirection="column">
-          <Box flexDirection="row">
-            <Button key="act-back" plain hotkey="b" label="back" onPress={() => void back($)} />
+          <Box key="head" flexDirection="row">
+            <Box marginRight={2}>
+              <Button key="act-back" plain autoFocus hotkey="b" label="back" onPress={() => void back($)} />
+            </Box>
+            {closeButton}
             <Text dimColor wrap="truncate">
               {'  '}
               {r?.path ?? ''}
@@ -366,6 +430,7 @@ export const register: Register = on => {
       // the actions stay in sight however long the detail, and lead the focus ring.
       return (
         <Box flexDirection="column">
+          {head('Esc closes too · b back to the lanes')}
           {d ? (
             lines.slice(0, 2).map(draw)
           ) : (
@@ -376,7 +441,7 @@ export const register: Register = on => {
           <Box flexDirection="row" flexWrap="wrap">
             {detailActions(ref, d).map(a => (
               <Box key={`box-${a.id}`} marginRight={2}>
-                <Button key={`act-${a.id}`} plain hotkey={a.hotkey} label={a.label} onPress={press => void act($, a.id, press.surface)} />
+                <Button key={`act-${a.id}`} plain {...(a.id === 'continue' ? { autoFocus: true as const } : {})} hotkey={a.hotkey} label={a.label} onPress={press => void act($, a.id, press.surface)} />
               </Box>
             ))}
           </Box>
@@ -391,18 +456,24 @@ export const register: Register = on => {
       )
     }
 
+    const listHead = head('Esc closes too · /crew toggles · /crew off hides the band')
     if (!b) {
       return (
         <Box flexDirection="column">
+          {listHead}
           <Text dimColor>{err ?? 'Reading the board…'}</Text>
         </Box>
       )
     }
+    const lines = paneLines(b, width, now)
+    // The ring starts on the row last opened, else the first, never on close.
+    const first = lines.find(l => l.ref === ref)?.ref ?? lines.find(l => l.ref)?.ref
     return (
       <Box flexDirection="column">
-        {paneLines(b, width, now).map(line =>
+        {listHead}
+        {lines.map(line =>
           line.ref ? (
-            <Button key={`row-${line.ref}`} plain label={line.text} {...(line.tone === 'dim' ? { dimColor: true } : {})} onPress={() => void openItem($, line.ref ?? '')} />
+            <Button key={`row-${line.ref}`} plain label={line.text} {...(line.tone === 'dim' ? { dimColor: true } : {})} {...(line.ref === first ? { autoFocus: true as const } : {})} onPress={() => void openItem($, line.ref ?? '')} />
           ) : (
             <Text key={line.key} bold={line.bold} wrap="truncate" {...COLOR[line.tone]}>
               {line.text}
@@ -411,7 +482,7 @@ export const register: Register = on => {
         )}
         <Text dimColor wrap="truncate">
           updated {b.generated_at.slice(11, 19) || '?'}Z{err ? ` · last poll: ${err}` : ''} ·{' '}
-          {e.props.isFocused ? 'Tab/arrows move, Enter opens, Esc to the prompt' : '/crew to refresh, ctrl+x tab to browse'}
+          {e.props.isFocused ? 'Tab/arrows move, Enter opens' : '/crew closes, ctrl+x tab to browse'}
         </Text>
       </Box>
     )

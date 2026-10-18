@@ -33,6 +33,7 @@ test('a row opens its item: chartroom show runs and the detail draws; back retur
   expect(await ui.find({ type: 'Text', text: '  herdr tab w1:t2 · chartroom attach auth-project-manager-108a' })).toBeDefined()
   const buttons = (await ui.findAll({ type: 'Button' })).map(b => [b.key, b.props.hotkey ?? null])
   expect(buttons).toEqual([
+    ['act-close', 'q'],
     ['act-continue', 'c'],
     ['act-copy-id', 'y'],
     ['act-copy-pr', 'p'],

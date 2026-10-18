@@ -89,6 +89,8 @@ declare module 'claude-code' {
       report: { path: string; text: string } | null
       /** What the last action did (copied, put in the prompt, or why not). */
       notice: string | null
+      /** True after `/crew off`: no band for the rest of the session, until `/crew on`. */
+      bandOff: boolean
     }
   }
 }
