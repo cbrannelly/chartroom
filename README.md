@@ -88,8 +88,10 @@ Enter opens one: its state, the commander's intent, the last events, the report'
 outcome, PRs, artifacts and where the worker runs. From there, `c` puts `/continue <id>` in the
 prompt (Enter runs it), `y` copies the id, `p` a PR URL, `a` an artifact, `r` reads the report,
 `b` goes back; `/crew <id>` opens an item directly. `q` or Esc closes the pane, `/crew` toggles
-it, and `/crew off` hides the band for the session. It polls `chartroom board --json` every 15
-seconds and reads an item with `chartroom show <id> --json`. Install it at user scope:
+it, and `/crew off` hides the band for the session. While [focus mode](#focus-mode-one-project-at-a-time)
+is on, the band leads with `🎯 <project> · N held` and counts only what is in focus. It polls
+`chartroom board --json` every 15 seconds and reads an item with `chartroom show <id> --json`.
+Install it at user scope:
 
 ```
 /plugin install crew-view@chartroom
@@ -401,6 +403,61 @@ Type the trailing slash (`chartroom/`) or the scheme, or the browser may search 
 Undo by reversing each step: remove the hosts line, the LaunchDaemons and the alias
 (`sudo ifconfig lo0 -alias 127.0.0.2`), and `caddy untrust`.
 
+## Focus mode: one project at a time
+
+When one project needs all of you, the rest of the crew can wait without being forgotten:
+
+```bash
+chartroom focus webapp          # or a few: webapp,billing; --for 4h ends it by itself
+chartroom focus webapp --scope INC-42   # narrower: only webapp's items that mention INC-42
+chartroom focus                 # 🎯 focus: webapp · 7 held (since 2h)
+chartroom focus off             # ends it and lists what was held
+```
+
+- **What is held.** While a focus is on, an item of a project out of focus is held when it would
+  ask something of you: a task in `decision`, `blocked`, `failed`, `awaiting-input` or `done`, or
+  a "Waiting on the commander" inbox item. The count is exactly that, read from disk, so
+  `status`, `board`, the dashboard and the crew views always agree. Workers in other projects
+  keep working: focus changes what reaches you, not what runs.
+- **Which projects.** The names `status` prints, comma-separated. A project is in focus when it
+  equals a name or starts with `<name>-` (case-insensitive), so `webapp` covers `webapp-api` but
+  not `webapps`. `chartroom focus <name>` says what it covers, and warns when nothing open
+  matches (a typo, or a project with no work yet).
+- **Narrower than a project.** `--scope <word>[,<word>...]` (an incident or ticket id) keeps in
+  focus only the focused projects' items that mention a scope word, as a whole word and
+  case-insensitively: a task in its title or id, an inbox item in its text. To bring an item into
+  the scope, name the word there (`chartroom new --title "INC-42: restore the job"`, `chartroom
+  inbox add --project webapp "INC-42: confirm the backlog is clear"`). Everything else in the
+  project is held like any other project's.
+- **Hard to miss.** `status` and `board` lead with `🎯 focus: webapp · 7 held (since 2h)`, and
+  `board` marks each held item `[<state> · held]` and each lane's held count. The dashboard
+  shows a focus strip with the held count, counts only what is in focus in its gauges and tab
+  title (which adds `🎯 7 held`), and dims other projects' cards (the strip's button hides them
+  instead, remembered in that browser). The crew views' band leads with `🎯 webapp · 7 held` and
+  counts only what is in focus; their pane adds the focus line and dims the rest.
+- **The XO.** `watch` still wakes the XO for other projects, as `[<id>] [<project>] [held]
+  <event>`, so it does the routine work silently (verifying, nudging, technical answers within
+  the brief) and puts what would go to you in the inbox, where it is held too. It ends each
+  reply with the held line, and `bearings` covers only the focus, plus the count. After `focus
+  off`, `bearings` walks the held items first.
+- **Breaking focus.** A production outage, an active security exposure or data loss is never
+  held. A worker reports one with `chartroom event <id> blocked --breaking "<what>"` (decision,
+  blocked or failed), and the XO can mark an inbox item with `inbox add --breaking`. The text
+  then starts with `[breaking] `: the item stays in view and leads Needs you, and its wake is not
+  marked held.
+- **`--for 30m|4h|1d`** gives the focus an end. Past it the focus is off (nothing runs to end it:
+  every reader checks the time), everything is back in view, and `chartroom focus` says when it
+  ran out. An end that turns itself off was chosen over a reminder because the risk is leaving
+  focus on: it cannot be forgotten, and the held items come back on every view the moment it
+  passes.
+- **On disk**, one small file that other tools may read to follow focus live: `focus.json` in
+  the home,
+  `{"schema": 1, "projects": ["webapp"], "scope": ["INC-42"], "since": "<UTC>", "until": "<UTC>"|null}`
+  (`scope` is `[]` without one; projects are lowercase). Focus is on while the file exists and
+  `until` is null or in the future; `focus off` removes it, and a new `focus` replaces it whole
+  (written to a temporary file, then renamed). For which items are in focus or held, read
+  `in_focus` and `held` from `chartroom board --json` rather than re-implementing the rules.
+
 ## Artifacts: drafts that outlive the chat
 
 The XO often drafts something for you to act on: a message to send, commands to run, notes.
@@ -558,6 +615,7 @@ raised as a wake. It never edits your agent config to pre-trust paths.
 $CHARTROOM_HOME/                    default ~/.chartroom
   commander.md  projects.md         standing preferences, per-project overrides
   rulings.log                       commander rulings, one line each; rendered into commander.md
+  focus.json                        focus mode's projects, scope, since and until (only while it is on)
   inbox.md                          questions waiting on the commander, chat approvals not yet in a brief
   AGENTS.md  CLAUDE.md              "a session here is the XO"
   tasks/<id>/meta.json              {"schema":1, id, kind, backend, project, base_sha, branch, worktree, ...}
@@ -591,11 +649,15 @@ write them:
 | `exited` | process wrappers (`... (exit N)`) | yes, unless the worker reported first |
 | `agent` | hooks: `turn-ended`, `awaiting-input: <why>`, `prompt-received` | `turn-ended` without a report, and `awaiting-input` |
 
+`chartroom event <id> decision|blocked|failed --breaking <text>` writes the text as
+`[breaking] <text>` (the line format is unchanged): focus mode never holds such a report.
+
 A worker whose newest report is `waiting` and whose session has stopped shows as `waiting` in
 `status` (not `stopped-silent`) until its until-time plus `CHARTROOM_WAITING_GRACE_MINUTES`, or,
 with no until-time, `CHARTROOM_WAITING_MAX_MINUTES` after the event; then `waiting-overdue`.
 Any later report, steer or dispatch closes the wait. `status --json` rows carry `waiting_on`,
-`waiting_until` and `waiting_since` (null without an open wait).
+`waiting_until` and `waiting_since` (null without an open wait), and focus mode's `breaking`,
+`in_focus` and `held` (in focus and not held while focus is off); so do the lanes JSON's cards.
 
 The event line format, the brief protocol and `meta.json`'s `schema` field are stable from 0.1.
 CLI flags may change before 1.0.

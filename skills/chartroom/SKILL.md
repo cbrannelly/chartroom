@@ -62,6 +62,8 @@ Run this once at the start of every session, before taking new work:
    - `waiting`: the worker ended its turn to wait on something (`waiting_on`, until
      `waiting_until`). Leave it be; it wakes you if the wait runs out.
    - `in-session` subagents from a dead session are gone. Re-dispatch them; the brief survives.
+   - A line starting `🎯 focus:` means focus mode is on: the Focus mode rules apply from your
+     first reply.
 3. Run `chartroom sweep --apply` (the `sweep` skill): it frees what finished work left running.
    Relay its one summary line; queue its "needs a human" lines with the other decisions.
 4. Start waiting for wakes (see Supervision) whenever any task is in flight.
@@ -160,6 +162,8 @@ happened). Your harness reference says which one to use. Every line is a wake, a
   would not answer.
 - `herdr: ...`: herdr's own agent-state signals.
 - `lost`: a worker vanished without an exit record.
+- `[held]` after the project: focus mode is on and the wake's project is out of focus (see
+  Focus mode). Handle it the same way, silently.
 
 On a wake:
 
@@ -249,6 +253,39 @@ others read between steps. `close` only marks it closed; its directory is never 
   dashboard card shows it as a chip that opens and copies it, and `chartroom artifact copy <ref>`
   copies it. A runbook is the commands themselves, ready to paste. To revise, `add` the same
   title again. Once the commander says it went out or ran, `chartroom artifact done <ref>`.
+
+## Focus mode
+
+The commander can focus on one project, or a few, at a time ("focus on webapp", "I need to
+concentrate on billing this afternoon"). Run `chartroom focus <project>[,<project>...]` with the
+names `status` prints (a name also covers `<name>-*`: `shop` takes in `shop-api`), adding
+`--for 4h` if they gave a time. For something narrower than a project, such as one incident,
+add `--scope <word>` (an incident or ticket id): only the items that mention it, in a task's
+title or id or an inbox item's text, stay in focus, so name it there when you brief or ask
+(`chartroom new --title "INC-42: ..."`, `chartroom inbox add --project <project> "INC-42: ..."`).
+It prints what the focus covers and how much it holds. Confirm in one line.
+
+While a focus is on (`status` and `board` lead with `🎯 focus: ...`; `chartroom focus` prints it):
+
+- **Surface only focused projects.** Other projects' questions, decisions and results wait,
+  and so do digests about them. Their workers keep working.
+- **Held wakes stay below deck.** `watch` marks every wake from a project out of focus
+  `[held]`. Do the routine work as usual, silently: verify done work, nudge, re-steer, answer
+  technical questions within the spec. Anything that needs the commander goes to the inbox
+  (`chartroom inbox add --project <project> "<question>"`), where it is held and counted. Don't
+  mention it.
+- **End every reply with the held line**, exactly as `chartroom focus` prints it
+  (`🎯 focus: webapp · 7 held (since 2h)`), so a focus is never left on by accident.
+- **Break focus only** for a production outage, an active security exposure or data loss in
+  any project. Raise it at once, led by `**Breaking focus · [<project>]**`. A worker's
+  `--breaking` report is never held, and it leads Needs you. Mark one yourself so the board
+  shows it through the focus: `chartroom event <id> blocked --breaking "<what>"`, or
+  `chartroom inbox add --project <project> --breaking "<what>"`.
+- The commander asking about another project directly isn't breaking focus. Answer it.
+- **Coming out.** On "focus off" (or "I'm back"), run `chartroom focus off`. It ends the focus
+  and lists what was held. Give the count in a line, then a `bearings` digest that walks those
+  items first. A `--for` focus ends by itself: once `chartroom focus` says it `ran out`, tell
+  the commander in one line, then offer bearings.
 
 ## Steering the tools themselves
 

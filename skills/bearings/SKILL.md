@@ -11,8 +11,16 @@ never from conversation memory. (If `chartroom` is not on PATH, use
 
 1. Get the facts:
    ```bash
+   chartroom focus --json
    chartroom status --json
    ```
+   **Focus mode.** When `focus --json` says `on: true`, the digest is about the focused
+   projects only: lead it with the focus line, exactly as `chartroom focus` prints it
+   (`🎯 focus: webapp · 7 held (since 2h)`). Leave out every task row whose `in_focus` is false,
+   every inbox item in its `items` list (the held items; `--breaking` ones are never there),
+   and their artifacts. Don't list or walk the held items: the count stands for them. When it says `on:
+   false` with `ran_out` set, open with one line: the focus on those projects ran out at
+   `until`, and everything is back in view.
    Also read `$CHARTROOM_HOME/inbox.md`: questions waiting on the commander and chat
    approvals not yet in a brief, and `chartroom artifact list --json`: drafts still to send
    or run. Run `chartroom sweep` (a dry run, a few lines): its
@@ -51,7 +59,8 @@ never from conversation memory. (If `chartroom` is not on PATH, use
    one line.
 
 3. If **Needs you** is non-empty, walk the decisions one at a time, starting with the
-   highest-impact one. Ask the question, led by its project as in the digest (with a question
+   highest-impact one. Right after the commander comes out of focus (`chartroom focus off`
+   listed what was held), walk those held items first. Ask the question, led by its project as in the digest (with a question
    tool, its header is the project name), wait for the answer, and carry it out through the
    chartroom skill's rules (`chartroom steer` to relay it, and record lasting preferences with
    `chartroom rule add`). Then move to the next one.
