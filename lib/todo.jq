@@ -18,8 +18,10 @@
 #
 # Focus mode (lib/focus.sh) decides what is held; this only reads it: each card's held, in_focus
 # and breaking, and the board's .focus. An artifact is held when its owner's card is out of focus;
-# one whose owner is on no card (a closed task, an answered inbox line) by focus_item. count is
-# what is not held, held what is. Without focus mode no card carries a mark and nothing is held.
+# one whose owner is on no card (a closed task, an answered inbox line) by focus_item; never one
+# marked "[breaking] " or on a breaking card. Urgency only orders the list: an urgent item focus
+# mode holds stays held. count is what is not held, held what is. Without focus mode no card
+# carries a mark and nothing is held.
 
 def marked: test("^\\[(breaking|urgent)\\] "; "i");
 def unmark: sub("^\\[(breaking|urgent)\\] +"; ""; "i");
@@ -50,7 +52,7 @@ def verb: {decision: "decide: ", blocked: "blocked: ", message: "send: ", runboo
    + [$artifacts[] | select(.kind == "message" or .kind == "runbook") | card_of(.) as $c
      | {ref, type: "artifact", kind, owner: (.ref | split("/") | .[0]), project: (.project // $c.project),
         title, text: .title, since: .created, path, card_breaking: ($c.breaking // false),
-        held: (if $f == null or ($c.breaking // false) or (.title | urgent) then false
+        held: (if $f == null or ($c.breaking // false) or (.title | test("^\\[breaking\\] "; "i")) then false
                elif $c != null then $c.in_focus == false
                else ({project, title} | focus_item($f) | not) end)}])
 | map(.breaking = (.card_breaking or (.text | urgent)) | del(.card_breaking)
@@ -58,7 +60,6 @@ def verb: {decision: "decide: ", blocked: "blocked: ", message: "send: ", runboo
     | .due = (.text | due)
     | .label = (if .kind == "ready" then "\(.why // "ready"): \(.text)" else (.kind | verb) + .text end)
     | .tickable = ((.type == "inbox" and .ref != null) or .type == "artifact")
-    | .held = (.held and (.breaking | not))
     | {ref, type, kind, owner, project: (.project // null), title, text, label, why: (.why // null),
        since: (.since // null), due, breaking, held, tickable, path: (.path // null)})
 | sort_by([(if .breaking then 0 else 1 end), (if .due then 0 else 1 end), (.due // ""), (.since // "~")])
