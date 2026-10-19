@@ -10,6 +10,10 @@ for Claude Code: chartroom's crew, live inside the XO's pi session.
   ⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · 💤 1 · ✅ 1 · ❌ 1  /crew
   ```
 
+  While focus mode is on (`chartroom focus`), it leads with the focus and its held count and
+  counts only what is in focus (`⚓ 🎯 shop · 3 held · 🏃 1 · 🙋 1 [shop] 108a`); the browser adds
+  the focus line and dims the rows out of focus.
+
 - **`/crew`, a browser of the items.** It takes over the editor's place until you close it:
   the board's lanes, ↑/↓ (or `j`/`k`) to move, Enter to open an item. Every view's first line
   reads `q: close`: `q` closes the browser from any view, and Esc closes it from the lanes (from

@@ -14,6 +14,20 @@ export type CrewItem = {
   state: string
   /** ISO time of the item's last event, or null. */
   last_at: string | null
+  /** Focus mode: the item is in focus (always, while focus is off), and whether it is held. */
+  in_focus: boolean
+  held: boolean
+}
+
+/** Focus mode, as `chartroom board --json` reports it: the focused projects and how many items are held. */
+export type CrewFocus = {
+  projects: string[]
+  /** Words that narrow the focus to the items mentioning them (an incident id); [] for none. */
+  scope: string[]
+  /** ISO times: when it began, and when it ends (null: until `chartroom focus off`). */
+  since: string
+  until: string | null
+  held: number
 }
 
 /** The board's lanes, as `chartroom board --json` names them. */
@@ -25,6 +39,8 @@ export type CrewBoard = {
   on_hold: CrewItem[]
   ready: CrewItem[]
   recent: CrewItem[]
+  /** Focus mode, or null while it is off. */
+  focus: CrewFocus | null
 }
 
 /** One event line of a task: `<at> <kind>: <text>`. */

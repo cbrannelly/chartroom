@@ -58,21 +58,23 @@ win_cmdline() { # <windows pid>
 # short_id is the item's "[i-xxxx]" tag (null when untagged), split off the text; project is
 # the "[project]" label after the date (null on an unlabelled line), split off the same way:
 #   - [i-7f3a] 2026-01-02 — [webapp] which region for staging?
+# Waiting items carry focus mode's in_focus/held marks (lib/focus.sh); a text starting with
+# "[breaking] " (inbox add --breaking) is never held.
 dashboard_inbox() {
   local f="$CR_HOME/inbox.md"
   [[ -f "$f" ]] || { echo '{"waiting":[],"approvals":[]}'; return 0; }
   awk '
     /^## / { s = ($0 ~ /^## Waiting/) ? "waiting" : ($0 ~ /^## Approvals/) ? "approvals" : ""; next }
     s != "" && /^- / && $0 !~ /^- \(none\)/ { sub(/^- /, ""); print s "\t" $0 }' "$f" |
-    jq -R -s '
+    jq -R -s --argjson focus "$(focus_json)" "$FOCUS_JQ"'
       [split("\n")[] | select(length > 0) | split("\t") | {section: .[0], text: (.[1:] | join("\t"))}
        | ([.text | capture("^\\[(?<id>i-[0-9a-f]{4,})\\] +(?<rest>.*)$")] | first) as $tag
        | if $tag then .short_id = $tag.id | .text = $tag.rest else .short_id = null end
        | . + (if (.text | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}"))
               then {date: .text[0:10], text: (.text[10:] | sub("^[\\s—–:-]+"; ""))} else {date: null} end)
        | ([.text | capture("^\\[(?<p>[^\\]]+)\\] +(?<rest>.*)$")] | first) as $proj
-       | if $proj then .project = $proj.p | .text = $proj.rest else .project = null end]
-      | {waiting: map(select(.section == "waiting") | del(.section)),
+       | if $proj and $proj.p != "breaking" then .project = $proj.p | .text = $proj.rest else .project = null end]
+      | {waiting: map(select(.section == "waiting") | del(.section) | . + focus_marks($focus; "inbox"; .text | startswith("[breaking] "))),
          approvals: map(select(.section == "approvals") | del(.section))}'
 }
 
@@ -110,7 +112,7 @@ dashboard_json() { # [pr-states-file]
   printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s \
     --argjson inbox "$(dashboard_inbox)" --argjson prs "$prs" --argjson hours "$hours" \
     --argjson artifacts "$arts" --argjson artifact_counts "$(jq -c "$ARTIFACT_COUNTS_JQ" <<<"$arts")" \
-    --arg home "$CR_HOME" --arg version "$CR_VERSION" \
+    --arg home "$CR_HOME" --arg version "$CR_VERSION" --argjson focus "$(focus_json)" \
     -f "$CR_ROOT/lib/dashboard/lanes.jq" |
     todo_attach "$arts" # .todo, the commander's next steps (lib/todo.sh)
 }
@@ -312,8 +314,9 @@ cmd_dashboard() {
 # `chartroom board`: the dashboard's lanes in the terminal, from the same dashboard_json, so
 # the two never disagree. One line per item: short id, [project], title, state, the refs of
 # its open artifacts, a snippet of the last event (the project leads the text, so a question
-# is placed at a glance); then the artifact count. Color only when stdout is a terminal (and
-# NO_COLOR is unset); --json is the lanes JSON.
+# is placed at a glance); then the artifact count. While focus mode is on, the focus line leads,
+# each lane's count says how many it holds, and a held item reads "[<state> · held]". Color only
+# when stdout is a terminal (and NO_COLOR is unset); --json is the lanes JSON.
 cmd_board() {
   local json=0 color=0 a board
   [[ -t 1 && -z "${NO_COLOR:-}" ]] && color=1
@@ -327,6 +330,7 @@ cmd_board() {
   done
   if [[ $json -eq 1 ]]; then dashboard_json; return; fi
   board="$(dashboard_json)"
+  jq -e '.focus' <<<"$board" >/dev/null && focus_line "$(jq -c '.focus | {projects, since, until}' <<<"$board")" "$(jq '.focus.held' <<<"$board")"
   jq -r --argjson color "$color" '
     def c($code): if $color == 1 then "\u001b[" + $code + "m" + . + "\u001b[0m" else . end;
     def cut($n): if length > $n then .[0:$n - 1] + "…" else . end;
@@ -337,12 +341,13 @@ cmd_board() {
     | ([$b.lanes[][] | (.short_id // "-") | length] | max // 4) as $w
     | $lanes[] as [$k, $name, $col]
     | ($b.lanes[$k] // []) as $items
-    | ("\($name) (\($items | length))" | c($col)),
+    | ([$items[] | select(.held)] | length) as $held
+    | ("\($name) (\($items | length)\(if $held > 0 then ", \($held) held" else "" end))" | c($col)),
       (if ($items | length) == 0 then "  none" | c("2")
        else $items[]
          | ((.short_id // "-") | pad($w) | c("1")) + "  "
            + (if (.project // "") != "" then ("[" + .project + "]" | c("1")) + " " else "" end) + ((.title // .id) | cut(60))
-           + "  " + ("[" + (.reason // .state // "") + "]" | c("2"))
+           + "  " + ("[" + (.reason // .state // "") + (if .held then " · held" else "" end) + "]" | c("2"))
            + ((.artifacts // []) | if length == 0 then ""
               else "  " + ("[artifact" + (if length > 1 then "s " else " " end) + (map(.ref) | join(", ")) + "]" | c("1;35")) end)
            + (if .type == "inbox" then (if .date then "  since " + .date else "" end)

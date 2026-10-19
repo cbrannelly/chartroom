@@ -7,6 +7,40 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
+- Focus mode: one project, or a few, at a time, with a held count so it is never left on by
+  accident. `chartroom focus <project>[,<project>...] [--for 30m|4h|1d]` writes `focus.json` in
+  the home and says what it covers; `chartroom focus [--json]` shows it; `chartroom focus off`
+  ends it and lists what was held. A project is in focus when it equals a name or starts with
+  `<name>-` (case-insensitive); `--scope <word>[,...]` narrows that to the items mentioning a
+  word (a task's title or id, an inbox item's text), for one incident inside a project. The file
+  is a small stable contract other tools can follow: `{"schema": 1, "projects", "scope",
+  "since", "until"}`, absent (or past `until`) when off. While a focus is on, an item of another project is held when it
+  would ask something of the commander: a task in `decision`, `blocked`, `failed`,
+  `awaiting-input` or `done`, or a "Waiting on the commander" inbox item. `status` and `board`
+  lead with `🎯 focus: <projects> · N held (since 2h)`, `board` marks held items and each lane's
+  held count, and `watch` marks a wake from a project out of focus `[<id>] [<project>] [held]
+  <event>` (still a wake: the XO does the routine work silently). `inbox add` says on stderr when
+  focus holds the new item. `--for` ends the focus by itself: past its end every reader treats
+  it as off, with no process to run, and `focus` says when it ran out. `status --json` rows and
+  the lanes JSON's cards gain `breaking`, `in_focus` and `held` (in focus and not held while
+  focus is off), and the lanes JSON a top-level `focus` (`{projects, scope, since, until, held}`, null
+  while off); nothing else in either changes. The dashboard shows a focus strip with the held
+  count, counts only what is in focus in its gauges, alert and tab title (which adds `🎯 N
+  held`), dims other projects' cards and keeps them out of the ship's log; the strip's button
+  hides them instead, remembered in that browser. The chartroom skill has the XO surface only
+  focused projects, end each reply with the held line, and break focus only for a production
+  outage, an active security exposure or data loss, labelled as breaking focus; `bearings`
+  leads with the focus line, covers only what is in focus, and after `focus off` walks the held
+  items first.
+- Breaking reports: `chartroom event <id> decision|blocked|failed --breaking <text>` and
+  `chartroom inbox add --breaking` start the text with `[breaking] ` (the event line format is
+  unchanged). Focus mode never holds such an item, its wake is never marked held, and it leads
+  Needs you. Every brief's protocol now tells the worker to use it only for a production outage,
+  an active security exposure or data loss.
+- crew-view 0.4.0: while focus mode is on, the band leads with `🎯 <projects> · N held` (never
+  cut for width) and counts only what is in focus; the `/crew` pane adds the focus line under
+  the legend and dims the rows out of focus. The pi crew view shares the code, so it shows the
+  same.
 - `chartroom todo`: your next steps, one list of what you owe the crew, made from the records
   chartroom already keeps: open "Waiting on the commander" inbox items, open `message` and
   `runbook` artifacts, and tasks in `decision`, `blocked` or `ready`. Breaking first (a
