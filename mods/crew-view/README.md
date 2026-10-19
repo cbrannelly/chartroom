@@ -18,6 +18,13 @@ live inside the XO's session:
   | ✅ | landed |
   | ❌ | failed |
 
+  While focus mode is on (`chartroom focus`), the band leads with the focus and its held
+  count, which never give way, and counts only what is in focus:
+
+  ```
+  ⚓ 🎯 shop · 3 held · 🏃 1 · 🙋 1 [shop] 108a                                  [ crew ]
+  ```
+
   A lane appears only when something is in it. Each emoji is wide on its own code point (no
   variation selector, so no `⏸️`), and the band counts it as two columns. A narrow terminal cuts the needs-you list to
   `+N more`, never mid-item. `[ crew ]` (or its hotkey `c` once the band has focus: ctrl+x tab or a
@@ -25,7 +32,8 @@ live inside the XO's session:
 - **A `/crew` pane that browses the items**, the web dashboard's equivalent inside Claude Code.
   It leads with the emoji legend, then the board's lanes (needs you, running, on hold, landed,
   failed), one row per item: `[project] short_id title state age-of-last-event`, sized to the
-  pane. `/crew` opens it with the keyboard: Tab or the arrows walk the rows, Enter opens one.
+  pane. While focus mode is on, the focus line (`🎯 focus: shop · 3 held (since 2h)`) follows
+  the legend and the rows out of focus are dim. `/crew` opens it with the keyboard: Tab or the arrows walk the rows, Enter opens one.
   `/crew <id>` opens that item straight away.
 
   Every view's first row reads `q: close`. `q` or Esc closes the pane from any view, and so does

@@ -21,6 +21,17 @@ test('paneLines: lanes in order, rows as [project] id title state age, fitted to
   for (const l of lines) expect(columns(l)).toBeLessThanOrEqual(72)
 })
 
+test('paneLines: focus mode adds its line under the legend and dims the rows out of focus', () => {
+  const raw = JSON.parse(boardJson())
+  for (const item of raw.lanes.needs_you) item.in_focus = item.project === 'shop'
+  raw.focus = { projects: ['shop'], scope: ['IR-006'], since: '2026-10-12T13:00:00Z', until: '2026-10-12T17:00:00Z', held: 2 }
+  const parsed = parseBoard(JSON.stringify(raw))
+  if ('error' in parsed) throw new Error(parsed.error)
+  const lines = paneLines(parsed.board, 72, NOW)
+  expect(lines[1]).toEqual({ key: 'focus', text: '🎯 focus: shop (IR-006) · 2 held (since 2h, until 17:00Z)', tone: 'warn', bold: true })
+  expect(lines.filter(l => l.ref === '108a' || l.ref === '9c1e').map(l => l.tone)).toEqual(['plain', 'dim'])
+})
+
 test('/crew opens the pane and it draws the board', async ($, on) => {
   const w = install(on, XO_WORLD())
   const opened: string[] = []

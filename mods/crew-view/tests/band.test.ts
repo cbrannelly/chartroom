@@ -56,6 +56,21 @@ describe('bandText', () => {
     expect(bandText(board({ lanes: { ...empty, on_hold: [held] } }), 100)).toBe('⚓ 💤 1')
   })
 
+  test('focus mode leads with the focus and its held count, never cut, and counts only what is in focus', () => {
+    const raw = JSON.parse(boardJson())
+    for (const item of [...raw.lanes.needs_you, ...raw.lanes.in_progress, ...raw.lanes.ready]) item.in_focus = item.project === 'shop'
+    raw.lanes.needs_you[1].held = true
+    raw.lanes.needs_you[2].held = true
+    raw.lanes.ready[0].held = true
+    raw.focus = { projects: ['shop'], since: '2026-10-12T13:00:00Z', until: null, held: 3 }
+    const b = board(raw)
+    expect(bandText(b, 200)).toBe('⚓ 🎯 shop · 3 held · 🏃 1 · 🙋 1 [shop] 108a')
+    expect(bandText(b, 30)).toBe('⚓ 🎯 shop · 3 held · 🏃 1 · 🙋 1 +1 more')
+    expect(bandSegments(b, 200)[1]).toEqual({ text: '🎯 shop · 3 held', tone: 'warn' })
+    raw.lanes = { needs_you: [], in_progress: [], on_hold: [], ready: [], recent: [] }
+    expect(bandText(board(raw), 100)).toBe('⚓ 🎯 shop · 3 held')
+  })
+
   test('unreadable output is an error line, not a throw', () => {
     expect(parseBoard('chartroom: no home')).toEqual({ error: 'chartroom board: unreadable output' })
   })

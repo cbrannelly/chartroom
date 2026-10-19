@@ -1,5 +1,5 @@
 // Pure helpers for crew-view: no `$`, so the tests can call them directly.
-import type { CrewBoard, CrewDetail, CrewItem } from '../types'
+import type { CrewBoard, CrewDetail, CrewFocus, CrewItem } from '../types'
 
 // ---------------------------------------------------------------- home and scope
 
@@ -71,7 +71,23 @@ function trimItem(raw: unknown): CrewItem | null {
     title: str(r.title) ?? id,
     state: str(r.state) ?? (type === 'inbox' ? 'inbox' : '?'),
     last_at: str(r.last_at),
+    in_focus: r.in_focus !== false,
+    held: r.held === true,
   }
+}
+
+function parseFocus(raw: unknown): CrewFocus | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const r = raw as Record<string, unknown>
+  const projects = Array.isArray(r.projects) ? r.projects.filter((p): p is string => typeof p === 'string') : []
+  if (!projects.length) return null
+  const scope = Array.isArray(r.scope) ? r.scope.filter((p): p is string => typeof p === 'string') : []
+  return { projects, scope, since: str(r.since) ?? '', until: str(r.until), held: typeof r.held === 'number' ? r.held : 0 }
+}
+
+/** The focus's name: `shop`, or `shop (IR-006)` with a scope. */
+export function focusName(f: CrewFocus): string {
+  return `${f.projects.join(', ')}${f.scope.length ? ` (${f.scope.join(', ')})` : ''}`
 }
 
 /** `chartroom board --json` output to the trimmed board, or an error line. */
@@ -98,8 +114,16 @@ export function parseBoard(stdout: string): { board: CrewBoard } | { error: stri
       on_hold: lane('on_hold'),
       ready: lane('ready'),
       recent: lane('recent'),
+      focus: parseFocus(r.focus),
     },
   }
+}
+
+/** The board as focus mode shows it: only the items in focus (every item while focus is off). */
+export function focusedBoard(board: CrewBoard): CrewBoard {
+  if (!board.focus) return board
+  const keep = (items: CrewItem[]) => items.filter(i => i.in_focus)
+  return { ...board, needs_you: keep(board.needs_you), in_progress: keep(board.in_progress), on_hold: keep(board.on_hold), ready: keep(board.ready), recent: keep(board.recent) }
 }
 
 /** `[project]` for an item; an inbox item without one reads `[inbox]`. */
@@ -125,6 +149,9 @@ export const LANE_EMOJI = {
   failed: '❌',
 } as const
 
+/** Focus mode's mark, wide on its own code point like the lane emoji. */
+export const FOCUS_EMOJI = '🎯'
+
 export const LEGEND = `${LANE_EMOJI.needsYou} needs you · ${LANE_EMOJI.running} running · ${LANE_EMOJI.onHold} on hold · ${LANE_EMOJI.landed} landed · ${LANE_EMOJI.failed} failed`
 
 export type Tone = 'plain' | 'dim' | 'warn' | 'error'
@@ -132,10 +159,12 @@ export type Segment = { text: string; tone: Tone }
 
 /**
  * The band's line, fitted to `width` columns (the needs-you list gives way first):
- * `⚓ 🏃 3 · 🙋 2 [shop] 108a, [api] 1b91 · 💤 1 · ✅ 1 · ❌ 1`.
+ * `⚓ 🏃 3 · 🙋 2 [shop] 108a, [api] 1b91 · 💤 1 · ✅ 1 · ❌ 1`. While focus mode is on it leads
+ * with the focus and its held count, which never give way, and counts only what is in focus:
+ * `⚓ 🎯 shop · 3 held · 🏃 1 · 🙋 1 [shop] 108a`.
  */
 export function bandSegments(board: CrewBoard, width: number): Segment[] {
-  const lanes = paneLanes(board)
+  const lanes = paneLanes(focusedBoard(board))
   const [needs, running, onHold, landed, failed] = lanes.map(l => l.items) as [CrewItem[], CrewItem[], CrewItem[], CrewItem[], CrewItem[]]
   const head: Segment = { text: '⚓ ', tone: 'plain' }
   const sep: Segment = { text: ' · ', tone: 'dim' }
@@ -147,8 +176,10 @@ export function bandSegments(board: CrewBoard, width: number): Segment[] {
     ...count(LANE_EMOJI.failed, failed.length, 'error'),
   ]
 
+  const focus: Segment[] = board.focus ? [{ text: `${FOCUS_EMOJI} ${focusName(board.focus)} · ${board.focus.held} held`, tone: 'warn' }] : []
+
   const build = (shown: number): Segment[] => {
-    const parts = [...before]
+    const parts = [...focus, ...before]
     if (needs.length) {
       const listed = needs.slice(0, shown).map(tag)
       const more = needs.length - shown
@@ -232,9 +263,17 @@ export function fit(text: string, width: number): string {
 /** One line of the pane; an item's row carries the item's `ref` (pressing it opens the item). */
 export type PaneLine = { key: string; text: string; tone: Tone; bold?: boolean; ref?: string }
 
+/** Focus mode's line, `🎯 focus: shop · 3 held (since 2h)`; null while focus is off. */
+export function focusText(board: CrewBoard, nowMs: number): string | null {
+  const f = board.focus
+  if (!f) return null
+  return `${FOCUS_EMOJI} focus: ${focusName(f)} · ${f.held} held (since ${age(f.since, nowMs)}${f.until ? `, until ${f.until.slice(11, 16)}Z` : ''})`
+}
+
 /**
- * The pane's lines sized to `width` columns: the emoji legend, then a header per lane with
- * items, NEEDS YOU always, each followed by one row per item: `[project] short_id title state age`.
+ * The pane's lines sized to `width` columns: the emoji legend (and focus mode's line), then a
+ * header per lane with items, NEEDS YOU always, each followed by one row per item:
+ * `[project] short_id title state age`. Out of focus, a row is dim.
  */
 export function paneLines(board: CrewBoard, width: number, nowMs: number): PaneLine[] {
   const lanes = paneLanes(board)
@@ -246,12 +285,14 @@ export function paneLines(board: CrewBoard, width: number, nowMs: number): PaneL
   const fixed = 2 + projW + 1 + idW + 1 + 1 + stateW + 1 + ageW
   const titleW = Math.max(8, width - fixed)
   const lines: PaneLine[] = [{ key: 'legend', text: LEGEND, tone: 'dim' }]
+  const focus = focusText(board, nowMs)
+  if (focus) lines.push({ key: 'focus', text: focus, tone: 'warn', bold: true })
   for (const lane of lanes) {
     if (!lane.items.length && lane.title !== 'NEEDS YOU') continue
     lines.push({ key: `h-${lane.title}`, text: `${lane.emoji} ${lane.title} (${lane.items.length})`, tone: lane.title === 'NEEDS YOU' && lane.items.length ? 'warn' : lane.title === 'FAILED' ? 'error' : 'plain', bold: true })
     for (const [n, item] of lane.items.entries()) {
       const row = `  ${label(item).padEnd(projW)} ${item.short_id.padEnd(idW)} ${fit(item.title, titleW)} ${item.state.padEnd(stateW)} ${age(item.last_at, nowMs).padStart(ageW)}`
-      lines.push({ key: `r-${lane.title}-${n}`, text: row, tone: lane.title === 'LANDED' ? 'dim' : 'plain', ...(item.ref ? { ref: item.ref } : {}) })
+      lines.push({ key: `r-${lane.title}-${n}`, text: row, tone: lane.title === 'LANDED' || !item.in_focus ? 'dim' : 'plain', ...(item.ref ? { ref: item.ref } : {}) })
     }
   }
   return lines
