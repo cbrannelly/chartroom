@@ -684,8 +684,9 @@ EOF2
   [ "$(card inbox-2 | jq -c '[.short_id, .project, .title, .date]')" = '[null,"multi","untagged and undated",null]' ]
   [ "$(card api-9c1d | jq -r .project)" = billing-api ]
   [ "$(jq -c '.inbox.approvals[0] | [.project, .text, .date]' <<<"$BOARD")" = '["billing","ok to rotate the test key","2026-01-04"]' ]
-  # backward compatible: an inbox card has every key it had before, plus project and artifacts
-  [ "$(card inbox-1 | jq -c 'keys - ["project", "artifacts"]')" = '["date","files","id","lane","last_at","prs","reason","short_id","state","title","type"]' ]
+  # backward compatible: an inbox card has every key it had before, plus project, artifacts and
+  # focus mode's breaking, in_focus, held
+  [ "$(card inbox-1 | jq -c 'keys - ["project", "artifacts", "breaking", "in_focus", "held"]')" = '["date","files","id","lane","last_at","prs","reason","short_id","state","title","type"]' ]
   run cr board --no-color
   grep -qE '^  21ba +\[todo-cli\] Task fix-login-21ba  \[decision\]' <<<"$output"
   grep -qE '^  9c1d +\[billing-api\] Task api-9c1d  \[blocked\]  blocked: need staging credentials$' <<<"$output"

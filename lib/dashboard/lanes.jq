@@ -6,6 +6,7 @@
 #   $artifacts        the open artifacts (artifacts_json --open); each card carries its own
 #   $artifact_counts  {open, message, runbook, note}
 #   $home, $version
+#   $focus    focus mode's {projects, since, until}, or null (lib/focus.sh)
 #
 # Rules (README "Dashboard" documents the same table):
 #   needs_you    decision, blocked, failed, awaiting-input; plus inbox "Waiting ..." items
@@ -16,6 +17,10 @@
 #                done with an open PR that still needs someone's review (from gh)
 #   ready        done, not closed, nothing above applies (a PR or report to read)
 #   recent       closed within $hours, or done with every known PR merged/closed (gh)
+#
+# Every card carries in_focus and held from its row or inbox item (lib/focus.sh), and breaking
+# (a `--breaking` report or inbox item: first in Needs you). The top-level
+# focus is $focus plus held, the count of held cards (null while focus is off).
 
 def ts: if . == null or . == "" then null else (try fromdateiso8601 catch null) end;
 def waits_on_person:
@@ -37,7 +42,8 @@ now as $now
     | {type: "task", id, short_id: ($t.short_id // $t.id), title, project, kind, backend, state, live, created, closed,
        last_event: $ev, last_at: ($t.last_event_at // $t.last_at // $t.dispatched // $t.created),
        prs: $pr, files, has_report, waiting_on: ($t.waiting_on // null), waiting_until: ($t.waiting_until // null),
-       artifacts: attached("task"; $t.id)}
+       artifacts: attached("task"; $t.id),
+       breaking: ($t.breaking // false), in_focus: ($t.in_focus != false), held: ($t.held // false)}
     | .lane = (
         if $t.state == "closed" then (if $closed_at != null and $closed_at >= $since then "recent" else null end)
         elif ($t.state | priority) < 4 then "needs_you"
@@ -63,7 +69,8 @@ now as $now
 | ($inbox.waiting | to_entries | map({type: "inbox", id: ("inbox-" + (.key | tostring)), short_id: (.value.short_id // null), project: (.value.project // null), title: .value.text,
      date: .value.date, last_at: (if .value.date then .value.date + "T00:00:00Z" else null end),
      lane: "needs_you", state: "inbox", reason: "waiting on you (inbox)", prs: [], files: [],
-     artifacts: (if .value.short_id then attached("inbox"; .value.short_id) else [] end)})) as $waiting
+     artifacts: (if .value.short_id then attached("inbox"; .value.short_id) else [] end),
+     breaking: (.value.text | startswith("[breaking] ")), in_focus: (.value.in_focus != false), held: (.value.held // false)})) as $waiting
 | def by_recent: sort_by(.last_at // "") | reverse;
   def lane($l): $tasks | map(select(.lane == $l));
   {
@@ -72,7 +79,7 @@ now as $now
     version: $version,
     recent_hours: $hours,
     lanes: {
-      needs_you: ((lane("needs_you") | sort_by([(.state | priority), (.last_at // "")])) + $waiting),
+      needs_you: ((lane("needs_you") | sort_by([(.state | priority), (.last_at // "")])) + $waiting | sort_by(.breaking | not)),
       in_progress: (lane("in_progress") | by_recent),
       on_hold: (lane("on_hold") | by_recent),
       ready: (lane("ready") | by_recent),
@@ -82,3 +89,4 @@ now as $now
     artifacts: $artifact_counts
   }
 | .counts = (.lanes | map_values(length))
+| .focus = (if $focus == null then null else $focus + {held: ([.lanes[][] | select(.held)] | length)} end)

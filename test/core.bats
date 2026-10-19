@@ -357,8 +357,8 @@ shorts() { cr status --all --json | jq -r 'map("\(.id)=\(.short_id)") | join(" "
   [ "$(cr status --all --json | jq -r '.[] | select(.id == "old-7f3a") | .short_id')" = d-7f3a ]
   # every short id is distinct
   [ "$(cr status --all --json | jq '[.[].short_id] | (unique | length) == length')" = true ]
-  # status --json keeps every existing field and only adds short_id
-  [ "$(cr status --json | jq -c '.[0] | keys')" = '["backend","branch","closed","created","dispatched","has_report","id","kind","last","last_at","live","project","short_id","state","title","updated","waiting_on","waiting_since","waiting_until"]' ]
+  # status --json keeps every existing field and only adds short_id (and focus mode's breaking, in_focus, held)
+  [ "$(cr status --json | jq -c '.[0] | keys - ["breaking", "in_focus", "held"]')" = '["backend","branch","closed","created","dispatched","has_report","id","kind","last","last_at","live","project","short_id","state","title","updated","waiting_on","waiting_since","waiting_until"]' ]
 }
 
 @test "short ids: an id whose suffix would start with a dash grows past it" {
@@ -464,7 +464,7 @@ shorts() { cr status --all --json | jq -r 'map("\(.id)=\(.short_id)") | join(" "
   done
   run cr inbox add --project
   [ "$status" -ne 0 ]
-  [[ "$output" == *"usage: chartroom inbox add [--project P] <text>"* ]]
+  [[ "$output" == *"usage: chartroom inbox add [--project P] [--breaking] <text>"* ]]
   cmp "$CHARTROOM_HOME/inbox.md" "$BATS_TEST_TMPDIR/before"   # nothing written on a refusal
 }
 

@@ -13,6 +13,7 @@
 #   tasks/<id>/report.md    the worker's final report
 #   tasks/<id>/artifacts/   drafts for the commander to send or run (lib/artifacts.sh)
 #   rulings.log             append-only commander rulings, latest wins per topic (lib/rulings.sh)
+#   focus.json              the project(s) in focus while focus mode is on (lib/focus.sh)
 #
 # Usage: chartroom <command> [args]   (chartroom help for the list)
 
@@ -71,6 +72,8 @@ source "$CR_ROOT/lib/rulings.sh"
 source "$CR_ROOT/lib/sweep.sh"
 # shellcheck source=../lib/artifacts.sh
 source "$CR_ROOT/lib/artifacts.sh"
+# shellcheck source=../lib/focus.sh
+source "$CR_ROOT/lib/focus.sh"
 for _f in "$CR_ROOT"/lib/backends/*.sh; do
   # shellcheck source=/dev/null
   source "$_f"
@@ -280,6 +283,9 @@ brief_report_steps() { # <id>
    \`waiting\` (right before you end a turn to wait on something: CI, a review, a timer, a person.
    Say what, and until when as a UTC time if known, e.g. "CI on PR 12 until 2026-01-05T15:30:00Z".
    When you resume, report again with \`progress\` or any other kind).
+   Only for a production outage, an active security exposure or data loss, add \`--breaking\`
+   after the kind (\`event $id blocked --breaking "<what>"\`; decision, blocked or failed): it
+   reaches the commander even while they focus on another project.
 3. Before \`done\` or \`failed\`, write $d/report.md containing: outcome; what changed
    (files, commits) or what you found; validation you actually ran with real results (never claim
    a check you did not run); risks and open questions.
@@ -543,12 +549,19 @@ cmd_dispatch() {
 
 # ---------------------------------------------------------------- event / hook / status / peek
 
+# --breaking (a production outage, an active security exposure, data loss) starts the text
+# with "[breaking] ", which focus mode never holds (lib/focus.sh); the line format is unchanged.
 cmd_event() {
-  [[ $# -ge 3 ]] || die "usage: chartroom event <id> <kind> <text>"
-  local id="$1" kind="$2"; shift 2
+  [[ $# -ge 3 ]] || die "usage: chartroom event <id> <kind> [--breaking] <text>"
+  local id="$1" kind="$2" mark=""; shift 2
   need_task "$id"
   [[ "$kind" =~ ^($EVENT_KINDS)$ ]] || die "event kind must be one of: ${EVENT_KINDS//|/, }"
-  log_event "$id" "$kind" "$*"
+  if [[ "$1" == --breaking ]]; then
+    [[ "$kind" =~ ^(decision|blocked|failed)$ ]] || die "--breaking goes with decision, blocked or failed"
+    shift; mark="[breaking] "
+  fi
+  [[ $# -ge 1 ]] || die "usage: chartroom event <id> <kind> [--breaking] <text>"
+  log_event "$id" "$kind" "$mark$*"
 }
 
 # Agent-native signals -> events. Called by Claude Code hooks (JSON on stdin) and by
@@ -616,12 +629,14 @@ state_of() { # derived from the last wake-worthy event; a restart re-derives the
 # then "waiting-overdue" (a live one stays "working"). waiting_on/waiting_until/waiting_since
 # describe the open `waiting` event whatever the state, and are null without one.
 # short_id is the task's short id (short_ids_json), which `resolve` maps back.
+# breaking: the state comes from a `--breaking` report; in_focus/held: focus mode's marks
+# (lib/focus.sh; in focus and not held while focus is off).
 status_rows() { # [--all] [--id ID]
-  local all=0 only="" id st d dirs live lastline wait shorts
+  local all=0 only="" id st d dirs live lastline wait shorts focus brk
   while [[ $# -gt 0 ]]; do
     case "$1" in --all) all=1; shift ;; --id) only="$2"; all=1; shift 2 ;; *) shift ;; esac
   done
-  shorts="$(short_ids_json)"
+  shorts="$(short_ids_json)"; focus="$(focus_json)"
   shopt -s nullglob
   dirs=("$CR_HOME"/tasks/*/)
   [[ -n "$only" ]] && dirs=("$CR_HOME/tasks/$only/") # one task (resolve, show): read only its record
@@ -640,22 +655,29 @@ status_rows() { # [--all] [--id ID]
     [[ "$st" == working && "$live" =~ ^(stopped|gone|idle|done)$ ]] && st="stopped-silent"
     [[ "$st" == working && "$live" == blocked ]] && st="awaiting-input"
     lastline="$(grep -vE ' note: ' "$d/events.log" 2>/dev/null | tail -1 || true)"
+    brk=false; breaking_of "$id" "$st" && brk=true
     jq -c --arg st "$st" --arg live "$live" --arg last "${lastline:21}" --arg last_at "${lastline:0:20}" \
-      --argjson wait "${wait:-null}" --argjson shorts "$shorts" \
+      --argjson wait "${wait:-null}" --argjson shorts "$shorts" --argjson focus "$focus" --argjson brk "$brk" \
       --argjson has_report "$([[ -s "$d/report.md" ]] && echo true || echo false)" \
-      '{id,title,kind,backend:(if (.backend//"")=="" then "auto" else .backend end),project:((.project//"")|rtrimstr("/")|split("/")|last),
+      "$FOCUS_JQ"'{id,title,kind,backend:(if (.backend//"")=="" then "auto" else .backend end),project:((.project//"")|rtrimstr("/")|split("/")|last),
         state:$st,live:$live,created,last:$last,last_at:(if $last_at=="" then null else $last_at end),
         updated,dispatched,closed,branch,has_report:$has_report,
         waiting_on:($wait.on // null),waiting_until:($wait.until // null),waiting_since:($wait.since // null),
-        short_id:($shorts[.id] // .id)}' "$d/meta.json"
+        short_id:($shorts[.id] // .id),breaking:$brk}
+       | . + focus_marks($focus; "task"; $brk)' "$d/meta.json"
   done
 }
 
 cmd_status() {
-  local json=0 all=0 a rows=() row
+  local json=0 all=0 a rows=() row focus
   for a in "$@"; do case "$a" in --json) json=1 ;; --all) all=1 ;; esac; done
   while IFS= read -r row; do rows+=("$row"); done < <(if [[ $all -eq 1 ]]; then status_rows --all; else status_rows; fi)
   if [[ $json -eq 1 ]]; then printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s .; return; fi
+  # Focus mode leads, so it is never left on unseen; the count is the board's (rows + inbox).
+  focus="$(focus_json)"
+  if [[ "$focus" != null ]]; then
+    focus_line "$focus" "$(printf '%s\n' "${rows[@]+"${rows[@]}"}" | focus_held_count)"
+  fi
   if [[ ${#rows[@]} -eq 0 ]]; then echo "no open tasks"
   else
     # The project comes right after the id, so a decision or blocker is placed at a glance.
@@ -730,18 +752,24 @@ cmd_inbox() {
         { print }' -v out="$out"
       cat "$out"; rm -f "$out"
       ;;
-    add) # add [--project P] <text>: a dated, tagged "Waiting" item at the end of that section; prints its id
-      local project="" words=()
+    add) # add [--project P] [--breaking] <text>: a dated, tagged "Waiting" item at the end of that section; prints its id
+      local project="" words=() mark="" focus
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --project) [[ $# -ge 2 ]] || die "usage: chartroom inbox add [--project P] <text>"; project="$(inbox_project "$2")" || exit 1; shift 2 ;;
+          --project) [[ $# -ge 2 ]] || die "usage: chartroom inbox add [--project P] [--breaking] <text>"; project="$(inbox_project "$2")" || exit 1; shift 2 ;;
           --project=*) project="$(inbox_project "${1#--project=}")" || exit 1; shift ;;
+          --breaking) mark="[breaking] "; shift ;;
           *) words+=("$1"); shift ;;
         esac
       done
-      [[ ${#words[@]} -ge 1 && -n "${words[*]}" ]] || die "usage: chartroom inbox add [--project P] <text>"
+      [[ ${#words[@]} -ge 1 && -n "${words[*]}" ]] || die "usage: chartroom inbox add [--project P] [--breaking] <text>"
+      # Focus mode holds it (lib/focus.sh): said on stderr, since stdout is the id.
+      focus="$(focus_json)"
+      if [[ "$focus" != null && -z "$mark" ]] && ! focus_has "$focus" "$(jq -cn --arg p "$project" --arg t "${words[*]}" '{project: $p, text: $t}')"; then
+        warn "held: focus is on $(jq -r "$FOCUS_JQ"' focus_name' <<<"$focus"); the commander sees it after focus off"
+      fi
       local out; out="$(mktemp)"
-      INBOX_TEXT="${project:+[$project] }${words[*]}" inbox_rewrite '
+      INBOX_TEXT="${project:+[$project] }$mark${words[*]}" inbox_rewrite '
         function put() { if (!done) { t = newtag(); print "- [" t "] " date " — " ENVIRON["INBOX_TEXT"]; print t > out; done = 1 } }
         function flush() { while (blank > 0) { print ""; blank-- } }
         /^## / { if (w) put(); flush(); w = ($0 ~ /^## Waiting/); seen = seen || w; print; next }
@@ -764,12 +792,12 @@ cmd_inbox() {
         w && index($0, "- [" tag "] ") == 1 {
           rest = substr($0, length("- [" tag "] ") + 1); d = ""
           if (match(rest, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][[:space:]]*(—|–|-|:)?[[:space:]]*/)) { d = substr(rest, 1, RLENGTH); rest = substr(rest, RLENGTH + 1) }
-          if (substr(rest, 1, 1) == "[" && (k = index(rest, "] ")) > 2) { rest = substr(rest, k + 2); sub(/^ +/, "", rest) }
+          if (substr(rest, 1, 1) == "[" && substr(rest, 1, 11) != "[breaking] " && (k = index(rest, "] ")) > 2) { rest = substr(rest, k + 2); sub(/^ +/, "", rest) }
           $0 = "- [" tag "] " d "[" ENVIRON["INBOX_PROJECT"] "] " rest; print $0 > out }
         { print }' -v tag="$tag" -v out="$out"
       if [[ -s "$out" ]]; then cat "$out"; rm -f "$out"; else rm -f "$out"; die "no open inbox item $tag"; fi
       ;;
-    *) die "usage: chartroom inbox add [--project P] <text> | inbox project <i-xxxx> <project> | inbox tag" ;;
+    *) die "usage: chartroom inbox add [--project P] [--breaking] <text> | inbox project <i-xxxx> <project> | inbox tag" ;;
   esac
 }
 
@@ -900,11 +928,15 @@ ensure_cursor() {
   done >"$CURSOR_FILE"
 }
 WOKE=0
+WATCH_FOCUS=null # the focus in force, re-read each round
 # "[<id>] [<project>] <what>": the project travels with every wake, so the XO relays a
-# question already labelled with where it comes from.
+# question already labelled with where it comes from. While focus mode is on, a wake from a
+# task out of focus reads "[<id>] [<project>] [held] <what>": the XO still does the routine
+# machinery, and holds what would go to the commander. A breaking report is never held.
 wake() {
-  local p; p="$(project_label "$1")"
-  printf '[%s] %s%s\n' "$1" "${p:+[$p] }" "$2"; WOKE=1
+  local p held=""; p="$(project_label "$1")"
+  if [[ "$WATCH_FOCUS" != null && "$2" != *": [breaking] "* ]] && ! focus_has_task "$WATCH_FOCUS" "$1"; then held="[held] "; fi
+  printf '[%s] %s%s%s\n' "$1" "${p:+[$p] }" "$held" "$2"; WOKE=1
 }
 
 watch_scan_lines() { # <id> <from-offset> <to-offset>
@@ -973,6 +1005,7 @@ cmd_watch() {
     [[ -f "$d/meta.json" && "$(backend_runner "$id" 2>/dev/null)" == herdr ]] && HST[$id]="$(herdr_status "$id" 2>/dev/null || true)"
   done
   while true; do
+    WATCH_FOCUS="$(focus_json)"
     for d in "$CR_HOME"/tasks/*/; do
       id="$(basename "$d")"; f="$d/events.log"
       [[ -f "$d/meta.json" && -f "$f" ]] || continue
@@ -1177,8 +1210,12 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           to its mailbox; "delivered" only once it is read)
   chartroom stop <id>                     interrupt a worker
   chartroom attach <id>                   open a session worker's terminal (herdr/cmux/tmux)
-  chartroom event <id> <kind> <text>      append a status event (workers use this; kinds: progress,
-                                          waiting, decision, blocked, done, failed)
+  chartroom event <id> <kind> [--breaking] <text>
+                                          append a status event (workers use this; kinds: progress,
+                                          waiting, decision, blocked, done, failed). --breaking
+                                          (decision, blocked, failed; a production outage, an
+                                          active security exposure, data loss) is never held by
+                                          focus mode
   chartroom status [--json] [--all]       fleet view, derived from disk + live backends
   chartroom board [--json] [--no-color]   the dashboard's lanes in the terminal, one line per
                                           item: short id, [project], title, state, last event
@@ -1189,10 +1226,11 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           board's card plus the commander's intent, the last
                                           events, the outcome, the report's summary, PRs, the
                                           artifacts and where the worker runs
-  chartroom inbox add [--project P] <text>
+  chartroom inbox add [--project P] [--breaking] <text>
                                           add a dated "Waiting on the commander" item with a
                                           stable id, labelled [P] (a name, or a repo path: its
-                                          directory name; "multi" for several); prints the id
+                                          directory name; "multi" for several); prints the id.
+                                          --breaking: never held by focus mode
   chartroom inbox project <i-xxxx> <P>    label (or relabel) an open Waiting item with [P]
   chartroom inbox tag                     give every untagged Waiting item its id (idempotent)
   chartroom artifact add <id> --kind message|runbook|note --title T [--slug S] <file|->
@@ -1223,9 +1261,24 @@ chartroom - run a crew of coding agents from one agent session (the XO)
   chartroom rule import <map> [--apply]   import a map as rulings: dry run by default; --apply
                                           backs the file up to records/, appends the rulings,
                                           removes the imported bullets and renders the block
+  chartroom focus <project>[,<project>...] [--scope WORD[,WORD...]] [--for 30m|4h|1d]
+                                          focus mode: hold every other project's questions and
+                                          results (tasks in decision, blocked, failed,
+                                          awaiting-input or done, and inbox items) until focus
+                                          off. A project is in focus when it equals a name or
+                                          starts with "<name>-"; --scope narrows it to the items
+                                          that mention a word (a task's title or id, an inbox
+                                          item's text), such as an incident id. status, board,
+                                          the dashboard and the crew views lead with the held
+                                          count; watch marks held wakes [held]. --for: off by
+                                          itself after that
+  chartroom focus [--json]                the focus and how many items it holds (--json: the
+                                          held items too)
+  chartroom focus off                     end it; prints what was held
   chartroom peek <id> [n]                 recent events and worker output
   chartroom watch [--once [--timeout S]]  wake stream: one line per event that needs the XO,
-                                          "[<id>] [<project>] <event>"
+                                          "[<id>] [<project>] <event>" ("[<id>] [<project>]
+                                          [held] <event>" for a project out of focus)
   chartroom dashboard [--port N] [--open] [--daemon] [--no-gh] [--theme chartroom|hud]
                       [--host ADDR | --expose] [--no-token]
                                           read-only web view (127.0.0.1, default port 4517):
@@ -1263,7 +1316,7 @@ EOF
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|artifact|rule|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|version|help) "cmd_$cmd" "$@" ;;
+  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|artifact|rule|focus|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|version|help) "cmd_$cmd" "$@" ;;
   install-skills) cmd_install_skills "$@" ;;
   ls) cmd_status "$@" ;;
   show) cmd_show "$@" ;;
