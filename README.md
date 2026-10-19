@@ -471,8 +471,9 @@ chartroom todo add --project shop "renew the cert by 2026-10-22"   # your own it
 ```
 
 - **Order.** Breaking first (a `[breaking]` or `[urgent]` mark, a `--breaking` report, or the word
-  urgent or asap), then by the earliest date in the text (`2026-10-22`, `not before 2026-10-19
-  06:00Z`), then oldest first.
+  urgent or asap), then by the earliest date in the text still ahead of the item (`2026-10-22`,
+  `not before 2026-10-19 06:00Z`; a date on or before the day the item was written, such as
+  `(asked 2026-10-17)`, is a record, not a due date), then oldest first.
 - **Ticking off.** `todo done` changes the record the item came from: it removes the inbox line
   (the section reads `- (none)` again once it is empty) or marks the artifact done. An inbox
   item's artifacts outlive its line, so a message to send stays on the list after its question is

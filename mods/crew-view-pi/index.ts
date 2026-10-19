@@ -253,7 +253,7 @@ export default function crewView(pi: ExtensionAPI) {
           return cmdCtx.ui.notify(sub === 'off' ? 'Todo list off for this session: /todo on brings it back; /todo still opens the browser.' : 'Todo list on.', 'info')
         }
         if (sub === 'add' || sub === 'done') {
-          const argv = sub === 'add' && rest[0] === '--project' && rest.length > 2 ? ['--project', rest[1] ?? '', rest.slice(2).join(' ')] : [rest.join(' ')]
+          const argv = sub === 'add' && rest[0] === '--project' ? ['--project', rest[1] ?? '', rest.slice(2).join(' ')] : [rest.join(' ')]
           if (!argv.at(-1)) return cmdCtx.ui.notify(sub === 'add' ? 'usage: /todo add [--project P] <text>' : 'usage: /todo done <ref>', 'warning')
           const ran = await runChartroom(['todo', sub, ...argv])
           void poll()

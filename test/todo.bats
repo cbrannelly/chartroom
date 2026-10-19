@@ -33,7 +33,7 @@ task() {
 - [i-0a01] 2026-01-02 — [shop] merge the parser PR?
 - [i-0a02] 2026-01-05 — renew the cert asap
 - [i-0a03] 2026-01-06 — [legal] sign the NDA, not before 2026-10-22 09:00Z
-- [i-0a04] 2026-01-07 — this one is not urgent
+- [i-0a04] 2026-01-07 — this one is not urgent (asked 2026-01-07, after 2026-01-02)
 
 ## Approvals given in chat, not yet in a brief
 - 2026-01-03 — ok to rotate the test key

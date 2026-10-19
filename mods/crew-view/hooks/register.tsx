@@ -383,7 +383,8 @@ async function todoRun($: EngineInterface, argText: string, name: string): Promi
     return { text: 'Todo list on.' }
   }
   if (sub === 'add' || sub === 'done') {
-    const args = sub === 'add' && rest[0] === '--project' && rest.length > 2 ? ['--project', rest[1] ?? '', rest.slice(2).join(' ')] : [rest.join(' ')]
+    const flagged = sub === 'add' && rest[0] === '--project'
+    const args = flagged ? ['--project', rest[1] ?? '', rest.slice(2).join(' ')] : [rest.join(' ')]
     if (!args.at(-1)) return { text: sub === 'add' ? `usage: /${name} add [--project P] <text>` : `usage: /${name} done <ref> (as the list shows it: i-7f3a, 21ba/reply-to-review)` }
     const ran = await runChartroom($, ['todo', sub, ...args])
     void poll($)
