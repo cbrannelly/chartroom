@@ -156,7 +156,15 @@ test('focus turning on shows within seconds: a change to focus.json polls at onc
   expect(await band.find({ type: 'Text', text: /🎯 shop, legal, billing \(IR-6\) · 1 held$/ })).toBeDefined()
 })
 
-test("where the person's own /todo holds the name, the list answers to /next and /crew todo; their /todo passes by", async ($, on) => {
+test('/crew todo is the same command as /todo: toggle, off, on', async ($, on) => {
+  const { opens } = await xo($, on)
+  expect((await run($, 'crew', 'todo')).text).toBe('Todo pane opened.')
+  expect((await run($, 'crew', 'todo off')).text).toBe('Todo list off for this session: /crew todo on brings it back; /crew todo still opens the pane.')
+  expect((await run($, 'crew', 'todo on')).text).toBe('Todo list on.')
+  expect(opens.map(o => o.id)).toEqual(['todo'])
+})
+
+test("where the person's own /todo holds the name, /crew todo still reaches the list and their /todo passes by", async ($, on) => {
   const world = XO_WORLD()
   world.taken = ['todo']
   const theirs: string[] = []
@@ -165,10 +173,11 @@ test("where the person's own /todo holds the name, the list answers to /next and
     return { text: 'their own todo skill' }
   })
   const { w, opens } = await xo($, on, todoJson(), world)
-  expect(w.commands).toEqual(['crew', 'next'])
+  expect(w.commands).toEqual(['crew'])
   expect((await run($, 'todo')).text).toBe('their own todo skill')
   expect(theirs).toEqual(['todo'])
-  expect((await run($, 'next')).text).toBe('Todo pane opened.')
-  expect((await run($, 'crew', 'todo off')).text).toBe('Todo list off for this session: /crew todo on brings it back; /crew todo still opens the pane.')
+  expect((await run($, 'crew', 'todo')).text).toBe('Todo pane opened.')
   expect(opens.map(o => o.id)).toEqual(['todo'])
+  const ui = await $.ui.mount({ plugin: 'crew-view', surface: 'terminal', component: 'Pane', requestId: 'todo', props: PANE_PROPS(100) })
+  expect(await ui.find({ type: 'Text', text: /Esc closes too · \/crew todo toggles · \/crew todo off hides the list/ })).toBeDefined()
 })

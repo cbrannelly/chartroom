@@ -96,8 +96,8 @@ own: the first three things you owe the crew (`‚òê [legal] i-7f3a sign the NDA ¬
 `+N more`, and while focus mode is on, the focus and how many items it holds. `/todo` opens a
 pane of all of it, where the row with the ring takes `c` (copy an artifact's text), `d` (done,
 pressed twice), `o` (`/continue <id>` into the prompt) and `a` (show the held items too); `/todo
-off` hides the list. Where your own `/todo` command or skill already has the name, the list
-answers to `/next` instead (and to `/crew todo` either way). Install it at user scope:
+off` hides the list. `/crew todo` is the same command (and the way in where your own `/todo`
+command or skill already has the name). Install it at user scope:
 
 ```
 /plugin install crew-view@chartroom

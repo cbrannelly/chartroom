@@ -253,7 +253,7 @@ others read between steps. `close` only marks it closed; its directory is never 
 - **The commander's todo list.** `chartroom todo` is the commander's own list of next steps,
   made from your records: the open Waiting inbox items, the open message and runbook artifacts,
   and the tasks in `decision`, `blocked` or `ready`. It shows under the crew view's band in
-  Claude Code and pi (`/todo`, or `/next` where their own `/todo` has the name) and atop the
+  Claude Code and pi (`/todo`; in Claude Code `/crew todo` too) and atop the
   dashboard, so keep it true: every question you wait on goes in the inbox, every draft to send
   or run in an artifact, and what is answered or sent comes off. When the commander asks you to
   remember something for them ("remind me to…", "add to my list"), `chartroom todo add --project

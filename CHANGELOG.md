@@ -21,9 +21,11 @@ are stable from 0.1.0.
 - crew-view 0.4.0: your todo list under the band, built-in todo style (the first three items not
   held, `+N more`, the focus and its held count), and a `/todo` pane of all of it where the row
   with the ring takes `c` (copy), `d` (done, pressed twice), `o` (`/continue <id>`) and `a` (the
-  held items). `/todo off` hides the list, `/todo add` and `/todo done` run the CLI's. Where the
-  person's own `/todo` command or skill holds the name, the list answers to `/next`, and `/crew
-  todo` works either way. A stat of `focus.json` and `inbox.md` every 3 s reads the board at once
+  held items). `/todo off` hides the list, `/todo add` and `/todo done` run the CLI's. `/crew todo`
+  is the same command, and the way in where the person's own `/todo` command or skill holds the
+  name. One chartroom pane at a time: opening the todo pane closes the crew pane and the other way
+  around, so `/crew todo` with the crew pane open switches to the list (0.3.0 read `todo` there as
+  an item id). A stat of `focus.json` and `inbox.md` every 3 s reads the board at once
   when either changes, so focus mode turning on or off shows without a restart. Registering a
   command no longer stops the mod's start when Claude Code refuses it.
 - The pi crew view gains the same list under its band and a `/todo` browser (`o` puts

@@ -100,10 +100,12 @@ live inside the XO's session:
 
   `/todo` toggles the pane, `/todo off` hides the list above the prompt for the session (`/todo
   on` brings it back), and `/todo add [--project P] <text>` and `/todo done <ref>` run the CLI's.
-  **Where your own `/todo` command or skill already has the name** (Claude Code refuses a
-  plugin's command that would shadow it), the list answers to **`/next`**, and your `/todo`
-  passes by untouched; `/crew todo` (with the same `off`, `on`, `add`, `done`) works either way,
-  and the pane's header names the one in force.
+  `/crew todo` is the same command, with the same `off`, `on`, `add` and `done`. One chartroom
+  pane shows at a time: opening the todo pane (`/todo`, `/crew todo`, `[ todo ]`) closes the crew
+  pane, and opening the crew pane (`/crew`, `/crew <id>`, `[ crew ]`) closes the todo pane. **Where your own
+  `/todo` command or skill already has the name** (Claude Code refuses a plugin's command that
+  would shadow it), `/crew todo` is the way in, your `/todo` passes by untouched, and the pane's
+  header says `/crew todo`.
 
 It reads `chartroom board --json` (chartroom on PATH, else `~/.local/bin/chartroom`) when it
 wakes, every 15 seconds after, and whenever a pane opens; the todo list rides in the same JSON
@@ -135,9 +137,11 @@ the person's closes. The frame's close mark (`✕`, a mouse click) is the person
 was not clicked in the live check.
 
 The todo list, checked live on Claude Code 2.1.303 (a throwaway home, the mod from
-`--plugin-dir`): the band draws the list under the crew line; `$.command.register` refuses
-`/todo` where the person's own `todo` skill holds it ("it is the user's /todo"), and the list
-then answers to `/next`; the `ui.focus` event follows the ring as the arrows move it, so `d` and
+`--plugin-dir`): the band draws the list under the crew line; `/todo` and `/crew todo` open and
+close the pane, and switch with the crew pane in both directions (one frame, no tabs; the pane
+switched to holds the keys); `$.command.register` refuses `/todo` where the person's own `todo` skill holds
+it ("it is the user's /todo"), and the mod starts anyway, `/crew todo` reaching the list; the
+`ui.focus` event follows the ring as the arrows move it, so `d` and
 `c` act on the row it is on; `d` twice removed the inbox line and moved the ring to the next row;
 `o` put `/continue <id>` in the prompt; an item added from another terminal, and focus mode
 turning off and on (with the focus-mode work laid over this branch), showed in the band within

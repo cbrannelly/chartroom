@@ -15,8 +15,7 @@
 //
 // The commander's todo list (the board's .todo, lib/todo.jq) sits under the band, built-in todo
 // style: the first three items not held by focus mode, `+N more`, and the focus with its held
-// count. `/todo` (`/next` where the person's own /todo command or skill has the name; `/crew
-// todo` either way) toggles a pane of all of it: Tab or the arrows walk the rows, and the row with
+// count. `/todo` (or `/crew todo`, the same command) toggles a pane of all of it: Tab or the arrows walk the rows, and the row with
 // the ring takes `c` (copy: an artifact's text, an inbox item's, a task's id), `d` (done, pressed
 // twice: `chartroom todo done`; a task's decision only clears when the XO relays the answer), `o`
 // (`/continue <id>` into the prompt) and `a` (show the held items too). `/todo off` hides the
@@ -33,9 +32,6 @@ import type { TodoActionId } from './todo'
 
 const PANE = 'crew'
 const TODO_PANE = 'todo'
-// The todo command's name: the first the engine lets this plugin have. A person's own /todo
-// (a skill, a command file) holds that name, and then the list answers to /next.
-const TODO_NAMES = ['todo', 'next']
 const POLL_MS = 15_000
 const WATCH_MS = 3_000
 
@@ -119,8 +115,9 @@ let pollAgain = false
 let watched = ''
 // Whether this load of the module has registered /crew and started the timer.
 let started = false
-// The name the todo command got (TODO_NAMES), or null while none.
-let todoCommand: string | null = null
+// Whether this plugin holds /todo: a person's own /todo (a skill, a command file) keeps the name,
+// and then `/crew todo` alone reaches the list.
+let hasTodo = false
 
 /** Reads the board into $.state; never throws, never overlaps a run still going. */
 async function poll($: EngineInterface): Promise<void> {
@@ -281,6 +278,8 @@ async function act($: EngineInterface, id: ActionId, surface?: RenderSurface) {
 
 async function openPane($: EngineInterface) {
   void poll($)
+  // One chartroom pane at a time: the crew's takes the todo list's place.
+  if (await isOpen($, false, TODO_PANE)) await closePane($, TODO_PANE)
   // Esc closes it, from the pane or from an idle, empty prompt, as `q` and `/crew` do.
   return $.ui.open({ id: PANE, title: 'Crew', focus: true, closeOnEscape: true })
 }
@@ -353,6 +352,8 @@ async function todoCurrent($: EngineInterface): Promise<{ key: string; item: Tod
 
 async function openTodo($: EngineInterface) {
   void poll($)
+  // One chartroom pane at a time: the todo list takes the crew pane's place.
+  if (await isOpen($)) await closePane($)
   return $.ui.open({ id: TODO_PANE, title: 'Todo', focus: true, closeOnEscape: true })
 }
 
@@ -395,9 +396,9 @@ async function todoRun($: EngineInterface, argText: string, name: string): Promi
   return toggleTodo($)
 }
 
-/** `/todo`, or `/next` where the person's own command holds the name: what the hints say. */
+/** `/todo`, or `/crew todo` where the person's own /todo holds the name: what the hints say. */
 function todoName(): string {
-  return `/${todoCommand ?? 'crew todo'}`
+  return hasTodo ? '/todo' : '/crew todo'
 }
 
 /** Ticks the row off: a first `d` arms it, a second runs `chartroom todo done`, then the ring moves on. */
@@ -451,18 +452,12 @@ async function start($: EngineInterface): Promise<void> {
   if (started) return
   started = true
   await $.command.register({ name: 'crew', description: "Toggle chartroom's crew pane; /crew <id> opens an item, /crew todo the todo list, /crew off hides the band" }).catch(() => {})
-  for (const name of TODO_NAMES) {
-    const got = await $.command
-      .register({ name, description: `Toggle your todo list (what the crew waits on you for); /${name} off hides it, /${name} add <text>, /${name} done <ref>` })
-      .then(
-        () => true,
-        () => false,
-      )
-    if (got) {
-      todoCommand = name
-      break
-    }
-  }
+  hasTodo = await $.command
+    .register({ name: 'todo', description: 'Toggle your todo list (what the crew waits on you for); /todo off hides it, /todo add <text>, /todo done <ref>' })
+    .then(
+      () => true,
+      () => false,
+    )
   void poll($)
   $.clock.every(POLL_MS, () => void tick($))
   $.clock.every(WATCH_MS, () => void watchFiles($))
@@ -515,11 +510,9 @@ export const register: Register = on => {
     return { text: opened.isPlaced ? 'Crew pane opened.' : 'Crew pane is waiting for room: widen the terminal.' }
   })
 
-  // The todo command (todoRun). Only the name this plugin holds is answered: a person's own
-  // /todo passes by untouched.
-  for (const name of TODO_NAMES) {
-    on('command.run', { command: name }, async ($, e, next) => (name === todoCommand ? todoRun($, e.args, name) : next(e)))
-  }
+  // The todo command (todoRun), when this plugin holds /todo; a person's own /todo passes by
+  // untouched.
+  on('command.run', { command: 'todo' }, async ($, e, next) => (hasTodo ? todoRun($, e.args, 'todo') : next(e)))
 
 
   // The person's close (Esc, the close mark) rests the pane as closePane does.

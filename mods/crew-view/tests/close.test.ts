@@ -9,22 +9,24 @@ async function xo($: Engine, on: Parameters<typeof install>[0]) {
   const w = install(on, XO_WORLD())
   const opens: { id: string; focus?: true; closeOnEscape?: true }[] = []
   const closes: string[] = []
-  let up = false
+  // The engine's panes: open ids in order, the newest shown, as tabs.
+  const open: string[] = []
   on('ui.open', ($, e) => {
     opens.push({ id: e.id, focus: e.focus, closeOnEscape: e.closeOnEscape })
-    up = true
+    if (!open.includes(e.id)) open.push(e.id)
     return { value: { isPlaced: true as const } }
   })
   on('ui.close', ($, e) => {
     closes.push(`${e.id}:${e.origin.kind}`)
-    up = false
+    const at = open.indexOf(e.id)
+    if (at >= 0) open.splice(at, 1)
     return { value: undefined }
   })
-  on('ui.panes', () => ({ value: up ? [{ id: 'crew', title: 'Crew', isShown: true, isFocused: true, isPlaced: true }] : [] }))
+  on('ui.panes', () => ({ value: open.map((id, i) => ({ id, title: id, isShown: i === open.length - 1, isFocused: i === open.length - 1, isPlaced: true })) }))
   await startXo($)
   await w.clock.settle()
   const crew = (args = '') => $.command.run({ command: 'crew', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
-  return { w, opens, closes, crew }
+  return { w, opens, closes, crew, open }
 }
 
 test('q closes the pane from the detail; the next open starts on the lanes, the ring on the row', async ($, on) => {
@@ -86,4 +88,24 @@ test('/crew off hides the band and closes the pane; with /todo off too polling s
   expect((await crew('on')).text).toBe('Crew band on.')
   await w.clock.settle()
   expect(await band.find({ type: 'Text', text: /^⚓/ })).toBeDefined()
+})
+
+test('one chartroom pane at a time: /crew todo and /todo switch from the crew pane, /crew switches back, either toggles shut', async ($, on) => {
+  const { opens, closes, crew, open } = await xo($, on)
+  const todo = (args = '') => $.command.run({ command: 'todo', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await crew()
+  expect((await crew('todo')).text).toBe('Todo pane opened.')
+  expect(open).toEqual(['todo'])
+  expect(closes).toEqual(['crew:plugin'])
+  expect((await crew()).text).toBe('Crew pane opened.')
+  expect(open).toEqual(['crew'])
+  expect((await todo()).text).toBe('Todo pane opened.')
+  expect(open).toEqual(['todo'])
+  expect((await todo()).text).toBe('Todo pane closed.')
+  expect((await crew('todo')).text).toBe('Todo pane opened.')
+  expect((await crew('todo')).text).toBe('Todo pane closed.')
+  expect(open).toEqual([])
+  expect(closes).toEqual(['crew:plugin', 'todo:plugin', 'crew:plugin', 'todo:plugin', 'todo:plugin'])
+  expect(opens.map(o => o.id)).toEqual(['crew', 'todo', 'crew', 'todo', 'todo'])
+  expect(opens.every(o => o.focus && o.closeOnEscape)).toBe(true)
 })
