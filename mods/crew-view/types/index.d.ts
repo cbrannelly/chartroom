@@ -66,6 +66,42 @@ export type CrewDetail = {
 /** Which view the pane shows. */
 export type CrewView = 'list' | 'detail' | 'report'
 
+/** One thing the commander owes, trimmed from `chartroom board --json`'s `.todo` (lib/todo.jq). */
+export type TodoItem = {
+  /** What `chartroom todo done` takes (an inbox tag, `<id>/<slug>`, a task's short id); null on an untagged inbox line. */
+  ref: string | null
+  /** `inbox`, `task` or `artifact`. */
+  type: string
+  /** `inbox`, `decision`, `blocked`, `ready`, `message` or `runbook`. */
+  kind: string
+  /** The id `/continue` and `/crew` take: the task's short id or the inbox tag (an artifact's owner). */
+  owner: string | null
+  project: string | null
+  text: string
+  /** The one line to show: `decide: …`, `send: …`, an inbox item's text. */
+  label: string
+  /** The earliest date found in the text (ISO), or null. */
+  due: string | null
+  /** When it became owed (ISO), or null. */
+  since: string | null
+  breaking: boolean
+  /** Held by focus mode: shown only on request. */
+  held: boolean
+  /** `todo done` can tick it off (an inbox item with an id, an artifact). */
+  tickable: boolean
+}
+
+/** Focus mode while it is on: `shop (IR-6)`. */
+export type TodoFocus = { name: string; since: string | null; until: string | null }
+
+/** The commander's list, in the CLI's order (breaking, then due dates, then oldest). */
+export type TodoList = {
+  focus: TodoFocus | null
+  /** How many items focus mode holds. */
+  held: number
+  items: TodoItem[]
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'crew-view': {
@@ -91,6 +127,18 @@ declare module 'claude-code' {
       notice: string | null
       /** True after `/crew off`: no band for the rest of the session, until `/crew on`. */
       bandOff: boolean
+      /** The commander's todo list as last read with the board; null when the CLI has none. */
+      todo: TodoList | null
+      /** True after `/todo off`: no list above the prompt, until `/todo on`. */
+      todoOff: boolean
+      /** The key of the /todo pane's selected row (the ring's, or the last pressed). */
+      todoSelected: string | null
+      /** The /todo pane shows the items focus mode holds too. */
+      todoHeld: boolean
+      /** The row a first `d` armed: a second `d` on it ticks it off. */
+      todoArmed: string | null
+      /** What the /todo pane's last action did. */
+      todoNotice: string | null
     }
   }
 }

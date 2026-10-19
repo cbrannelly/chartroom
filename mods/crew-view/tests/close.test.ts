@@ -64,7 +64,7 @@ test('/crew toggles the pane; /crew <id> always opens', async ($, on) => {
   await w.clock.settle()
 })
 
-test('/crew off hides the band and closes the pane, polling stops; /crew on brings it back', async ($, on) => {
+test('/crew off hides the band and closes the pane; with /todo off too polling stops; /crew on brings it back', async ($, on) => {
   const { w, closes, crew } = await xo($, on)
   const band = await $.ui.mount({ plugin: 'crew-view', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS(120) })
   expect(await band.find({ type: 'Text', text: /^⚓/ })).toBeDefined()
@@ -73,6 +73,8 @@ test('/crew off hides the band and closes the pane, polling stops; /crew on brin
   expect(closes).toEqual(['crew:plugin'])
   expect(await band.find({ type: 'Text', text: 'engine' })).toBeDefined()
   expect(await band.find({ type: 'Text', text: /^⚓/ })).toBeUndefined()
+  // The todo list still reads the board: off too, nothing does.
+  await $.command.run({ command: 'todo', args: 'off', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   const boards = () => w.runs.filter(r => r[1] === 'board').length
   const before = boards()
   await w.clock.advance(45_000)

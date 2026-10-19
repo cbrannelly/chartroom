@@ -7,12 +7,12 @@ import { BAND_PROPS, HOME, XO_WORLD, install, startXo } from './world'
 const XO = `${HOME}/.captain`
 
 for (const skill of ['captain', 'chartroom', 'chartroom:captain']) {
-  test(`the XO session wakes when it loads ${skill}: registers /crew, polls, keeps polling`, async ($, on) => {
+  test(`the XO session wakes when it loads ${skill}: registers /crew and /todo, polls, keeps polling`, async ($, on) => {
     const w = install(on, XO_WORLD())
     const expanded = await startXo($, XO, skill)
     expect(expanded.text).toBe(`the ${skill} skill`)
     await w.clock.settle()
-    expect(w.commands).toEqual(['crew'])
+    expect(w.commands).toEqual(['crew', 'todo'])
     expect(w.runs).toEqual([['chartroom', 'board', '--json']])
     await w.clock.advance(15_000)
     expect(w.runs).toHaveLength(2)
@@ -41,7 +41,7 @@ test('loading the skill twice starts one poll, not two', async ($, on) => {
   await startXo($)
   await $.skill.prompt({ skill: 'chartroom', text: 'again' })
   await w.clock.settle()
-  expect(w.commands).toEqual(['crew'])
+  expect(w.commands).toEqual(['crew', 'todo'])
   await w.clock.advance(15_000)
   expect(w.runs).toHaveLength(2)
 })
@@ -51,7 +51,7 @@ test('a session whose state already says active (a hot reload) wakes at session.
   on('state.get', ($, e, next) => (e.plugin === 'crew-view' && e.key === 'active' ? { value: { value: true, version: 1 } } : next(e)))
   await $.session.start({ cwd: XO, surface: 'terminal', isInteractive: true })
   await w.clock.settle()
-  expect(w.commands).toEqual(['crew'])
+  expect(w.commands).toEqual(['crew', 'todo'])
   expect(w.runs).toEqual([['chartroom', 'board', '--json']])
 })
 
@@ -83,7 +83,7 @@ test('CHARTROOM_HOME in the environment wins over the config file', async ($, on
   world.env = { ...world.env, CHARTROOM_HOME: '/srv/crew' }
   const w = install(on, world)
   await startXo($, '/srv/crew')
-  expect(w.commands).toEqual(['crew'])
+  expect(w.commands).toEqual(['crew', 'todo'])
 })
 
 test('with no config file, a pre-existing ~/.captain (and no ~/.chartroom) is the home', async ($, on) => {
@@ -91,5 +91,5 @@ test('with no config file, a pre-existing ~/.captain (and no ~/.chartroom) is th
   world.files = {}
   const w = install(on, world)
   await startXo($, XO)
-  expect(w.commands).toEqual(['crew'])
+  expect(w.commands).toEqual(['crew', 'todo'])
 })

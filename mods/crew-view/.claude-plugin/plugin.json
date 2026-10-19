@@ -1,7 +1,7 @@
 {
   "name": "crew-view",
-  "version": "0.3.0",
-  "description": "chartroom's crew, live in the XO's Claude Code session: a band above the prompt and a /crew pane that browses the items, opens one, and continues it or copies its id, PRs and artifacts.",
+  "version": "0.4.0",
+  "description": "chartroom's crew, live in the XO's Claude Code session: a band above the prompt, a /crew pane that browses the items, and the commander's todo list under the band, with a /todo pane to copy, continue and tick items off.",
   "author": { "name": "wolzey", "url": "https://github.com/wolzey" },
   "homepage": "https://github.com/wolzey/chartroom",
   "license": "MIT",

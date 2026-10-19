@@ -57,6 +57,33 @@ export function showJson(over: Record<string, unknown> = {}): string {
   })
 }
 
+/** A board's `.todo` (lib/todo.jq) shaped like the CLI's: a breaking blocker, a due date, a decision, an artifact. */
+export function todoJson(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const item = (ref: string, type: string, kind: string, owner: string, project: string, label: string, more: Record<string, unknown> = {}) => ({
+    ref, type, kind, owner, project, title: label, text: label, label, why: null, due: null, since: '2026-10-12T00:00:00Z',
+    breaking: false, held: false, tickable: type !== 'task', path: null, ...more,
+  })
+  return {
+    focus: null,
+    count: 4,
+    held: 0,
+    items: [
+      item('9c1e', 'task', 'blocked', '9c1e', 'billing', 'blocked: prod is down, need the DB password', { breaking: true, since: '2026-10-12T15:00:30Z' }),
+      item('i-7f3a', 'inbox', 'inbox', 'i-7f3a', 'legal', 'sign the NDA by 2026-10-22', { due: '2026-10-22T00:00:00Z' }),
+      item('108a', 'task', 'decision', '108a', 'shop', 'decide: pick A or B (recommend A)', { since: '2026-10-09T15:12:30Z' }),
+      item('108a/reply', 'artifact', 'message', '108a', 'shop', 'send: Reply to the review', { since: '2026-10-12T15:10:00Z' }),
+    ],
+    ...over,
+  }
+}
+
+/** The same list while focus mode holds an api item: `chartroom focus shop,legal,billing --scope IR-6`. */
+export function focusedTodoJson(): Record<string, unknown> {
+  const base = todoJson()
+  const held = { ref: 'i-0b01', type: 'inbox', kind: 'inbox', owner: 'i-0b01', project: 'api', title: 'rotate the key', text: 'rotate the key', label: 'rotate the key', why: null, due: null, since: '2026-10-11T00:00:00Z', breaking: false, held: true, tickable: true, path: null }
+  return { ...base, focus: { projects: ['shop', 'legal', 'billing'], scope: ['IR-6'], since: '2026-10-12T09:00:00Z', until: null, held: 3 }, held: 1, items: [...(base.items as unknown[]), held] }
+}
+
 type Ran = { exitCode: number; stdout: string; stderr: string }
 
 export type World = {
@@ -69,6 +96,10 @@ export type World = {
   show: (id: string) => Ran
   /** What `chartroom artifact show <ref>` prints for a ref. */
   artifact: (ref: string) => Ran
+  /** What `chartroom todo <args>` prints. */
+  todo: (args: string[]) => Ran
+  /** Files whose stat answers this mtime (focus.json, inbox.md); any other path stats as a folder. */
+  mtimes: Record<string, number>
   /** The prompt box's draft. */
   draft: string
 }
@@ -80,6 +111,8 @@ export const XO_WORLD = (): World => ({
   board: () => ({ exitCode: 0, stdout: boardJson(), stderr: '' }),
   show: id => (id === '108a' ? { exitCode: 0, stdout: showJson(), stderr: '' } : { exitCode: 1, stdout: '', stderr: `chartroom: unknown id '${id}'` }),
   artifact: ref => ({ exitCode: 0, stdout: `the text of ${ref}\n`, stderr: '' }),
+  todo: args => ({ exitCode: 0, stdout: `${args[0]} ${args.slice(1).join(' ')}\n`, stderr: '' }),
+  mtimes: {},
   draft: '',
 })
 
@@ -110,12 +143,16 @@ export function install(on: On, world: World) {
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
   })
-  on('fs.stat', ($, e) => ({ value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
+  on('fs.stat', ($, e) => {
+    const mtime = world.mtimes[e.path]
+    if (mtime !== undefined) return { value: { kind: 'file' as const, size: 1, mtimeMs: mtime, isLink: false, realPath: e.path } }
+    return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }
+  })
   on('process.run', ($, e) => {
     runs.push([...e.argv])
     const out = world.board()
     if (out === 'missing' || e.argv[0] !== 'chartroom') return { deny: `spawn ${e.argv[0]} ENOENT` }
-    const reply = e.argv[1] === 'show' ? world.show(e.argv[2] ?? '') : e.argv[1] === 'artifact' ? world.artifact(e.argv[3] ?? '') : out
+    const reply = e.argv[1] === 'show' ? world.show(e.argv[2] ?? '') : e.argv[1] === 'artifact' ? world.artifact(e.argv[3] ?? '') : e.argv[1] === 'todo' ? world.todo(e.argv.slice(2)) : out
     return { value: { ...reply, isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.copy', ($, e) => {
@@ -123,6 +160,8 @@ export function install(on: On, world: World) {
     return { value: { isCopied: true as const } }
   })
   on('prompt.read', () => ({ value: { text: world.draft, cursor: world.draft.length } }))
+  // The ring moves where it is asked to (the person's arrows, the plugin's $.ui.focus).
+  on('ui.focus', () => ({}))
   on('prompt.fill', ($, e) => {
     fills.push(e.text)
     return { isFilled: true }

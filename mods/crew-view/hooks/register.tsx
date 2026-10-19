@@ -12,15 +12,28 @@
 // on one-letter hotkeys: continue (`/continue <id>` into the prompt), copy the id or a PR,
 // read the report, copy an artifact, back. `q` or Esc closes the pane, `/crew` toggles it,
 // and `/crew off` hides the band for the session (`/crew on` brings it back).
+//
+// The commander's todo list (the board's .todo, lib/todo.jq) sits under the band, built-in todo
+// style: the first three items not held by focus mode, `+N more`, and the focus with its held
+// count. `/todo` toggles a pane of all of it: Tab or the arrows walk the rows, and the row with
+// the ring takes `c` (copy: an artifact's text, an inbox item's, a task's id), `d` (done, pressed
+// twice: `chartroom todo done`; a task's decision only clears when the XO relays the answer), `o`
+// (`/continue <id>` into the prompt) and `a` (show the held items too). `/todo off` hides the
+// list, `/todo add <text>` and `/todo done <ref>` run the CLI's. The list follows focus.json and
+// inbox.md within seconds (a stat every 3 s, no process), the rest with the 15 s poll.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
-import type { CrewBoard, CrewDetail, CrewView } from '../types'
+import type { CrewBoard, CrewDetail, CrewView, TodoItem, TodoList } from '../types'
 import { bandSegments, configPath, detailActions, detailLines, isUnderWorktrees, paneLines, parseBoard, parseDetail, resolveHome, samePath } from './crew'
 import type { ActionId, Tone } from './crew'
+import { doneRefusal, parseTodo, shownItems, todoActions, todoBandLines, todoKey, todoPaneLines } from './todo'
+import type { TodoActionId } from './todo'
 
 const PANE = 'crew'
+const TODO_PANE = 'todo'
 const POLL_MS = 15_000
+const WATCH_MS = 3_000
 
 const XO_SKILLS = ['captain', 'chartroom']
 
@@ -35,6 +48,12 @@ const detailError = atom({ plugin: 'crew-view', key: 'detailError' } as const, n
 const report = atom({ plugin: 'crew-view', key: 'report' } as const, null as { path: string; text: string } | null)
 const notice = atom({ plugin: 'crew-view', key: 'notice' } as const, null as string | null)
 const bandOff = atom({ plugin: 'crew-view', key: 'bandOff' } as const, false)
+const todo = atom({ plugin: 'crew-view', key: 'todo' } as const, null as TodoList | null)
+const todoOff = atom({ plugin: 'crew-view', key: 'todoOff' } as const, false)
+const todoSelected = atom({ plugin: 'crew-view', key: 'todoSelected' } as const, null as string | null)
+const todoHeld = atom({ plugin: 'crew-view', key: 'todoHeld' } as const, false)
+const todoArmed = atom({ plugin: 'crew-view', key: 'todoArmed' } as const, null as string | null)
+const todoNotice = atom({ plugin: 'crew-view', key: 'todoNotice' } as const, null as string | null)
 
 const COLOR: Record<Tone, { color?: string; dimColor?: boolean }> = {
   plain: {},
@@ -90,12 +109,19 @@ async function runChartroom($: EngineInterface, args: string[]): Promise<{ stdou
 // The XO's chartroom home, set by session.start; a reload re-runs it.
 let home = ''
 let polling = false
+// A poll asked for while one runs (after `d`, a file change): it runs again once that one ends.
+let pollAgain = false
+// focus.json and inbox.md as last stat'ed ("mtime:size" each), so a change polls at once.
+let watched = ''
 // Whether this load of the module has registered /crew and started the timer.
 let started = false
 
 /** Reads the board into $.state; never throws, never overlaps a run still going. */
 async function poll($: EngineInterface): Promise<void> {
-  if (polling) return
+  if (polling) {
+    pollAgain = true
+    return
+  }
   polling = true
   try {
     const ran = await runChartroom($, ['board', '--json'])
@@ -105,13 +131,19 @@ async function poll($: EngineInterface): Promise<void> {
     } else if (parsed.board.home && !samePath(parsed.board.home, home)) {
       await update($, error, () => `chartroom's home is ${parsed.board.home}, not ${home}`)
     } else {
+      const list = 'stdout' in ran ? parseTodo(ran.stdout) : null
       await update($, board, () => parsed.board)
+      await update($, todo, () => list)
       await update($, error, () => null)
     }
   } catch (err) {
     await update($, error, () => `crew view: ${String(err).split('\n')[0]}`).catch(() => {})
   } finally {
     polling = false
+  }
+  if (pollAgain) {
+    pollAgain = false
+    return poll($)
   }
   // A detail on screen follows the board; one left open in a closed pane waits for /crew.
   const ref = await read($, selected).catch(() => null)
@@ -180,24 +212,32 @@ async function say($: EngineInterface, text: string) {
   await update($, notice, () => text)
 }
 
-/** Puts `text` on the clipboard of the surface the press came from, and says how it went. */
-async function copy($: EngineInterface, text: string, what: string, surface?: RenderSurface) {
+/** Puts `text` on the clipboard of the surface the press came from; returns how it went. */
+async function copied($: EngineInterface, text: string, what: string, surface?: RenderSurface): Promise<string> {
   const done = await $.ui.copy({ text, ...(surface ? { surface } : {}) })
-  await say($, done.isCopied ? `copied ${what}` : `could not copy ${what} (${done.reason}): ${text}`)
+  return done.isCopied ? `copied ${what}` : `could not copy ${what} (${done.reason}): ${text}`
 }
 
-/** `/continue <id>` into an empty prompt; a draft is never replaced: then it is copied. */
-async function continueItem($: EngineInterface, ref: string, surface?: RenderSurface) {
+async function copy($: EngineInterface, text: string, what: string, surface?: RenderSurface) {
+  await say($, await copied($, text, what, surface))
+}
+
+/** `/continue <id>` into an empty prompt; a draft is never replaced: then it is copied. Returns what happened. */
+async function continued($: EngineInterface, ref: string, surface?: RenderSurface): Promise<string> {
   const line = `/continue ${ref}`
   const box = await $.prompt.read()
   if (box.text.trim() === '') {
     const filled = await $.prompt.fill({ text: line, mode: 'replace' })
     // The fill hands the keys to the prompt: Enter runs it.
-    if (filled.isFilled) return say($, `${line} is in the prompt: press Enter to run it`)
+    if (filled.isFilled) return `${line} is in the prompt: press Enter to run it`
   }
   const done = await $.ui.copy({ text: line, ...(surface ? { surface } : {}) })
   const why = box.text.trim() ? 'the prompt holds a draft, kept' : 'the prompt cannot take it now'
-  await say($, done.isCopied ? `${line} copied (${why}): paste it at the prompt` : `${why}; type ${line}`)
+  return done.isCopied ? `${line} copied (${why}): paste it at the prompt` : `${why}; type ${line}`
+}
+
+async function continueItem($: EngineInterface, ref: string, surface?: RenderSurface) {
+  await say($, await continued($, ref, surface))
 }
 
 async function openReport($: EngineInterface) {
@@ -239,28 +279,116 @@ async function openPane($: EngineInterface) {
   return $.ui.open({ id: PANE, title: 'Crew', focus: true, closeOnEscape: true })
 }
 
-/** True while the pane is open, shown or behind another pane's tab. */
-async function isOpen($: EngineInterface, shownOnly = false): Promise<boolean> {
+/** True while the pane (`id`, the crew's by default) is open, shown or behind another pane's tab. */
+async function isOpen($: EngineInterface, shownOnly = false, id = PANE): Promise<boolean> {
   const panes = await $.ui.panes().catch(() => [])
-  return panes.some(p => p.id === PANE && (!shownOnly || p.isShown))
+  return panes.some(p => p.id === id && (!shownOnly || p.isShown))
 }
 
-/** A closed pane opens next on the lanes. */
-async function rest($: EngineInterface) {
+/** A closed pane opens next on the lanes; a closed todo pane forgets its notice and a half-done `d`. */
+async function rest($: EngineInterface, id = PANE) {
+  if (id === TODO_PANE) {
+    await update($, todoNotice, () => null)
+    await update($, todoArmed, () => null)
+    return
+  }
   await update($, view, () => 'list')
   await update($, notice, () => null)
 }
 
-/** Closes the pane. The plugin's own close passes beneath its ui.close hook: it rests here. */
-async function closePane($: EngineInterface) {
-  await $.ui.close({ id: PANE }).catch(() => {})
-  await rest($)
+/** Closes a pane. The plugin's own close passes beneath its ui.close hook: it rests here. */
+async function closePane($: EngineInterface, id = PANE) {
+  await $.ui.close({ id }).catch(() => {})
+  await rest($, id)
 }
 
-/** The timer's poll; skipped while nothing shows the board (the band off, the pane closed). */
+/** True while something shows the board: the band, the todo list, or either pane. */
+async function showing($: EngineInterface): Promise<boolean> {
+  if (!(await read($, bandOff).catch(() => false)) || !(await read($, todoOff).catch(() => false))) return true
+  return (await isOpen($)) || (await isOpen($, false, TODO_PANE))
+}
+
+/** The timer's poll; skipped while nothing shows the board. */
 async function tick($: EngineInterface) {
-  if ((await read($, bandOff).catch(() => false)) && !(await isOpen($))) return
+  if (await showing($)) await poll($)
+}
+
+/** Polls at once when focus.json or inbox.md changed: focus mode turned on or off, an item added or ticked. */
+async function watchFiles($: EngineInterface) {
+  if (!(await showing($))) return
+  const stamp = (f: string) => $.fs.stat(`${home}/${f}`).then(s => `${s.mtimeMs}:${s.size}`, () => '-')
+  const now = (await Promise.all([stamp('focus.json'), stamp('inbox.md')])).join('|')
+  const changed = watched !== '' && now !== watched
+  watched = now
+  if (changed) await poll($)
+}
+
+// ---------------------------------------------------------------- the todo list
+
+async function todoSay($: EngineInterface, text: string | null) {
+  await update($, todoNotice, () => text)
+}
+
+/** The /todo pane's rows that hold an item, as drawn, with their keys. */
+function todoRows(list: TodoList, withHeld: boolean): { key: string; item: TodoItem }[] {
+  const keyed = list.items.map((item, i) => ({ key: todoKey(item, i), item }))
+  const next = keyed.filter(r => !r.item.held)
+  return withHeld ? [...next, ...keyed.filter(r => r.item.held)] : next
+}
+
+/** The selected row: the one the ring or a press last chose, else the first. */
+async function todoCurrent($: EngineInterface): Promise<{ key: string; item: TodoItem } | null> {
+  const list = await read($, todo)
+  if (!list) return null
+  const rows = todoRows(list, await read($, todoHeld))
+  const sel = await read($, todoSelected)
+  return rows.find(r => r.key === sel) ?? rows[0] ?? null
+}
+
+async function openTodo($: EngineInterface) {
+  void poll($)
+  return $.ui.open({ id: TODO_PANE, title: 'Todo', focus: true, closeOnEscape: true })
+}
+
+/** Ticks the row off: a first `d` arms it, a second runs `chartroom todo done`, then the ring moves on. */
+async function todoDone($: EngineInterface, row: { key: string; item: TodoItem }) {
+  const why = doneRefusal(row.item)
+  if (why) return todoSay($, why)
+  if ((await read($, todoArmed)) !== row.key) {
+    await update($, todoArmed, () => row.key)
+    return todoSay($, `d again ticks off ${row.item.ref}: ${row.item.label}`)
+  }
+  await update($, todoArmed, () => null)
+  const ran = await runChartroom($, ['todo', 'done', row.item.ref ?? ''])
+  if ('error' in ran) return todoSay($, ran.error)
+  const list = await read($, todo)
+  const rows = list ? todoRows(list, await read($, todoHeld)) : []
+  const at = rows.findIndex(r => r.key === row.key)
+  const nextKey = (rows[at + 1] ?? rows[at - 1])?.key ?? null
+  await update($, todo, l => (l ? { ...l, items: l.items.filter(i => i.ref !== row.item.ref) } : l))
+  await update($, todoSelected, () => nextKey)
+  await todoSay($, ran.stdout.trim().split('\n')[0] || `done ${row.item.ref}`)
+  if (nextKey) void $.ui.focus({ requestId: TODO_PANE, key: nextKey }).catch(() => {})
   await poll($)
+}
+
+async function todoAct($: EngineInterface, id: TodoActionId, surface?: RenderSurface) {
+  if (id === 'held') {
+    await update($, todoHeld, h => !h)
+    return todoSay($, null)
+  }
+  const row = await todoCurrent($)
+  if (!row) return todoSay($, 'nothing on the list')
+  if (id === 'done') return todoDone($, row)
+  await update($, todoArmed, () => null)
+  const { item } = row
+  if (id === 'continue') return item.owner ? todoSay($, await continued($, item.owner, surface)) : undefined
+  if (item.type === 'artifact' && item.ref) {
+    const ran = await runChartroom($, ['artifact', 'show', item.ref])
+    return todoSay($, 'error' in ran ? ran.error : await copied($, ran.stdout, `artifact ${item.ref}`, surface))
+  }
+  if (item.type === 'task') return todoSay($, await copied($, item.owner ?? '', item.owner ?? 'the id', surface))
+  await todoSay($, await copied($, item.text, item.ref ?? 'the item', surface))
 }
 
 /** True when this is the XO's session and it has loaded the captain or chartroom skill. */
@@ -273,8 +401,10 @@ async function start($: EngineInterface): Promise<void> {
   if (started) return
   started = true
   await $.command.register({ name: 'crew', description: "Toggle chartroom's crew pane; /crew <id> opens an item, /crew off hides the band" })
+  await $.command.register({ name: 'todo', description: 'Toggle your todo list (what you owe the crew); /todo off hides it, /todo add <text>, /todo done <ref>' })
   void poll($)
   $.clock.every(POLL_MS, () => void tick($))
+  $.clock.every(WATCH_MS, () => void watchFiles($))
 }
 
 export const register: Register = on => {
@@ -323,37 +453,171 @@ export const register: Register = on => {
     return { text: opened.isPlaced ? 'Crew pane opened.' : 'Crew pane is waiting for room: widen the terminal.' }
   })
 
+  // `/todo` toggles its pane; `/todo off` hides the list above the prompt (and the pane) for the
+  // session, `/todo on` brings it back; `/todo add <text>` and `/todo done <ref>` run the CLI's.
+  on('command.run', { command: 'todo' }, async ($, e) => {
+    const words = e.args.trim().split(/\s+/).filter(Boolean)
+    const [sub, ...rest] = words
+    if (sub === 'off') {
+      await update($, todoOff, () => true)
+      await closePane($, TODO_PANE)
+      return { text: 'Todo list off for this session: /todo on brings it back; /todo still opens the pane.' }
+    }
+    if (sub === 'on') {
+      await update($, todoOff, () => false)
+      void poll($)
+      return { text: 'Todo list on.' }
+    }
+    if (sub === 'add' || sub === 'done') {
+      const args = sub === 'add' && rest[0] === '--project' && rest.length > 2 ? ['--project', rest[1] ?? '', rest.slice(2).join(' ')] : [rest.join(' ')]
+      if (!args.at(-1)) return { text: sub === 'add' ? 'usage: /todo add [--project P] <text>' : 'usage: /todo done <ref> (as the list shows it: i-7f3a, 21ba/reply-to-review)' }
+      const ran = await runChartroom($, ['todo', sub, ...args])
+      void poll($)
+      if ('error' in ran) return { text: ran.error }
+      return { text: sub === 'add' ? `added ${ran.stdout.trim()}: ${args.at(-1)}` : ran.stdout.trim() }
+    }
+    if (sub) return { text: 'usage: /todo [on|off|add [--project P] <text>|done <ref>]' }
+    if (await isOpen($, true, TODO_PANE)) {
+      await closePane($, TODO_PANE)
+      return { text: 'Todo pane closed.' }
+    }
+    const opened = await openTodo($)
+    return { text: opened.isPlaced ? 'Todo pane opened.' : 'Todo pane is waiting for room: widen the terminal.' }
+  })
+
   // The person's close (Esc, the close mark) rests the pane as closePane does.
   on('ui.close', async ($, e, next) => {
     const closed = await next(e)
-    if (e.id === PANE) await rest($)
+    if (e.id === PANE || e.id === TODO_PANE) await rest($, e.id)
     return closed
   })
 
+  // The todo pane's selection follows the ring, so `d` and `c` act on the row it is on.
+  on('ui.focus', async ($, e, next) => {
+    const moved = await next(e)
+    if (e.requestId === TODO_PANE && e.plugin === 'crew-view' && e.element?.startsWith('todo-') && !moved?.deny) {
+      await update($, todoSelected, () => e.element ?? null).catch(() => {})
+    }
+    return moved
+  })
+
+  // The band: the crew's line, then the todo list nearest the prompt (each hidden by its `off`).
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || !(await isActive($)) || (await read($, bandOff))) return next(e)
-    const b = await read($, board)
-    const err = await read($, error)
-    if (!b && !err) return next(e)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    if (e.props.hasSurvey || !(await isActive($))) return next(e)
+    const b = (await read($, bandOff)) ? null : await read($, board)
+    const err = (await read($, bandOff)) ? null : await read($, error)
+    const list = (await read($, todoOff)) ? null : await read($, todo)
     const width = Math.max(10, e.props.bodyColumns - 9)
+    const crew = b || err
+    const rows = list ? todoBandLines(list, width, Math.min(3, Math.max(1, e.props.maxRows - (crew ? 2 : 1)))) : []
+    if (!crew && !rows.length) return next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     return (
-      <Box flexDirection="row">
-        <Box flexGrow={1}>
-          {b ? (
-            <Text wrap="truncate">
-              {bandSegments(b, width).map(s => (
-                <Text {...COLOR[s.tone]}>{s.text}</Text>
-              ))}
-              {err ? <Text dimColor> ({err})</Text> : null}
-            </Text>
+      <Box flexDirection="column">
+        {crew ? (
+          <Box key="crew" flexDirection="row">
+            <Box flexGrow={1}>
+              {b ? (
+                <Text wrap="truncate">
+                  {bandSegments(b, width).map(s => (
+                    <Text {...COLOR[s.tone]}>{s.text}</Text>
+                  ))}
+                  {err ? <Text dimColor> ({err})</Text> : null}
+                </Text>
+              ) : (
+                <Text dimColor wrap="truncate">
+                  ⚓ {err}
+                </Text>
+              )}
+            </Box>
+            <Button key="open" label="crew" hotkey="c" onPress={() => void openPane($)} />
+          </Box>
+        ) : null}
+        {rows.map((r, i) =>
+          i === 0 ? (
+            <Box key="todo-band" flexDirection="row">
+              <Box flexGrow={1}>
+                <Text wrap="truncate" {...COLOR[r.tone]}>
+                  {r.text}
+                </Text>
+              </Box>
+              <Button key="todo-open" label="todo" hotkey="t" onPress={() => void openTodo($)} />
+            </Box>
           ) : (
-            <Text dimColor wrap="truncate">
-              ⚓ {err}
+            <Text key={r.key} wrap="truncate" {...COLOR[r.tone]}>
+              {r.text}
             </Text>
-          )}
+          ),
+        )}
+      </Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: TODO_PANE }, async ($, e, next) => {
+    if (!(await isActive($))) return next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const list = await read($, todo)
+    const err = await read($, error)
+    const withHeld = await read($, todoHeld)
+    const note = await read($, todoNotice)
+    const b = await read($, board)
+    const width = e.props.bodyColumns
+    const head = (
+      <Box key="head" flexDirection="row">
+        <Box flexShrink={0}>
+          <Button key="todo-close" plain hotkey="q" label="close" role="dismiss" onPress={() => void closePane($, TODO_PANE)} />
         </Box>
-        <Button key="open" label="crew" hotkey="c" onPress={() => void openPane($)} />
+        <Text dimColor wrap="truncate">
+          {'  '}Esc closes too · /todo toggles · /todo off hides the list
+        </Text>
+      </Box>
+    )
+    if (!list) {
+      return (
+        <Box flexDirection="column">
+          {head}
+          <Text dimColor>{err ?? (b ? 'This chartroom keeps no todo list: update it (chartroom todo).' : 'Reading the list…')}</Text>
+        </Box>
+      )
+    }
+    const current = await todoCurrent($)
+    const lines = todoPaneLines(list, width, await $.clock.now(), { selected: current?.key ?? null, withHeld })
+    return (
+      <Box flexDirection="column">
+        {head}
+        <Box flexDirection="row" flexWrap="wrap">
+          {todoActions(current?.item ?? null, list, withHeld).map(a => (
+            <Box key={`box-${a.id}`} marginRight={2}>
+              <Button key={`todo-act-${a.id}`} plain hotkey={a.hotkey} label={a.label} onPress={press => void todoAct($, a.id, press.surface)} />
+            </Box>
+          ))}
+        </Box>
+        {note ? (
+          <Text key="todo-notice" color="success" wrap="truncate">
+            {note}
+          </Text>
+        ) : null}
+        {lines.map(line =>
+          line.item ? (
+            <Button
+              key={line.key}
+              plain
+              label={line.text}
+              {...(line.tone === 'dim' ? { dimColor: true } : {})}
+              {...(line.key === current?.key ? { autoFocus: true as const } : {})}
+              onPress={() => void update($, todoSelected, () => line.key).then(() => update($, todoArmed, () => null))}
+            />
+          ) : (
+            <Text key={line.key} bold={line.bold} wrap="truncate" {...COLOR[line.tone]}>
+              {line.text}
+            </Text>
+          ),
+        )}
+        <Text dimColor wrap="truncate">
+          {shownItems(list, withHeld).length ? 'the row with the ring: d done (twice), c copy, o continue · ' : ''}
+          {e.props.isFocused ? 'Tab/arrows move' : '/todo closes, ctrl+x tab to use the keys'}
+          {err ? ` · last poll: ${err}` : ''}
+        </Text>
       </Box>
     )
   })
