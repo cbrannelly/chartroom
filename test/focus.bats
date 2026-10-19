@@ -23,19 +23,22 @@ task_in() { # <project> <kind> [--breaking] <text>
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "focus on: shop" ]]
   [[ "$output" == *"nothing open is in shop yet"* ]]
-  [[ "${lines[${#lines[@]}-1]}" == "🎯 focus: shop · 0 held (since <1m)" ]]
+  [[ "${lines[${#lines[@]}-1]}" == "🎯 focus: shop · 0 held (since "*")" ]]
   [ "$(jq -c .projects "$CHARTROOM_HOME/focus.json")" = '["shop"]' ]
   run cr focus Shop,BILLING --for 2h
   [[ "${lines[0]}" == "focus on: shop, billing until "*" (was shop)" ]]
   [ "$(jq -r '.until | fromdateiso8601 - now | . > 7100 and . <= 7200' "$CHARTROOM_HOME/focus.json")" = true ]
+  # durations, pinned well inside their buckets so a slow run cannot change them
+  jq '.since = (now - 3 * 86400 - 2.5 * 3600 | floor | todate) | .until = (now + 2 * 86400 + 3.5 * 3600 | floor | todate)' \
+    "$CHARTROOM_HOME/focus.json" >"$BATS_TEST_TMPDIR/f" && mv "$BATS_TEST_TMPDIR/f" "$CHARTROOM_HOME/focus.json"
   run cr focus
-  [[ "$output" == "🎯 focus: shop, billing · 0 held (since <1m, 1h59m left)" ]]
+  [[ "$output" == "🎯 focus: shop, billing · 0 held (since 3d2h, 2d3h left)" ]]
   run cr focus 'no/slash'
   [ "$status" -ne 0 ]
   run cr focus shop --for soon
   [ "$status" -ne 0 ]
   run cr focus off
-  [[ "$output" == "focus off: shop, billing, on for <1m. Nothing was held." ]]
+  [[ "$output" == "focus off: shop, billing, on for 3d2h. Nothing was held." ]]
   [ ! -e "$CHARTROOM_HOME/focus.json" ]
   run cr focus off
   [ "$output" = "focus: already off" ]
@@ -53,7 +56,7 @@ task_in() { # <project> <kind> [--breaking] <text>
   cr inbox add "unlabelled question" >/dev/null 2>&1
   run cr focus shop
   [[ "${lines[0]}" == "focus on: shop (covers shop, shop-api, 1 inbox item)" ]]
-  [[ "$output" == *"🎯 focus: shop · 4 held (since <1m)" ]]
+  [[ "$output" == *"🎯 focus: shop · 4 held (since "* ]]
   # held: shopify's blocker, billing's result, two inbox items. Not: shop, shop-api, a
   # progressing task, a breaking failure.
   run cr status --json
@@ -61,7 +64,7 @@ task_in() { # <project> <kind> [--breaking] <text>
   [ "$(jq -r --arg f "$f" '.[] | select(.id == $f) | [.breaking, .in_focus, .held] | @csv' <<<"$output")" = "true,true,false" ]
   [ "$(jq -r --arg e "$e" '.[] | select(.id == $e) | [.in_focus, .held] | @csv' <<<"$output")" = "false,false" ]
   run cr status
-  [ "${lines[0]}" = "🎯 focus: shop · 4 held (since <1m)" ]
+  [[ "${lines[0]}" == "🎯 focus: shop · 4 held (since "* ]]
   BOARD="$(cr board --json)"
   [ "$(jq '.focus.held' <<<"$BOARD")" -eq 4 ]
   [ "$(jq -r '.lanes.needs_you[0].id' <<<"$BOARD")" = "$f" ] # a breaking report leads Needs you
@@ -69,13 +72,13 @@ task_in() { # <project> <kind> [--breaking] <text>
   [ "$(jq -c '[.lanes.needs_you[] | select(.type == "inbox") | .in_focus]' <<<"$BOARD")" = '[true,false,false]' ]
   [ "$(jq -r --arg c "$c" '.lanes[][] | select(.id == $c) | [.in_focus, .held] | @csv' <<<"$BOARD")" = "false,true" ]
   run cr board --no-color
-  [ "${lines[0]}" = "🎯 focus: shop · 4 held (since <1m)" ]
+  [[ "${lines[0]}" == "🎯 focus: shop · 4 held (since "* ]]
   [[ "$output" == *"Needs you (6, 3 held)"* ]]
   grep -qE '\[shopify\] .*\[blocked · held\]' <<<"$output"
   run cr focus --json
   [ "$(jq -r '[.on, .held, (.items | length)] | @csv' <<<"$output")" = "true,4,4" ]
   run cr focus off
-  [[ "${lines[0]}" == "focus off: shop, on for <1m. 4 held, now back in view:" ]]
+  [[ "${lines[0]}" == "focus off: shop, on for "*". 4 held, now back in view:" ]]
   [[ "$output" == *"[shopify] stub task  [blocked]"* ]]
   run cr status --json
   [ "$(jq '[.[] | select(.held)] | length' <<<"$output")" -eq 0 ]
@@ -143,7 +146,7 @@ task_in() { # <project> <kind> [--breaking] <text>
   cr event "$a" decision "restore the job?"
   cr event "$b" decision "which copy?"
   run cr status
-  [ "${lines[0]}" = "🎯 focus: shop (IR-006) · 4 held (since <1m)" ]   # b, c, d and the checkout question
+  [[ "${lines[0]}" == "🎯 focus: shop (IR-006) · 4 held (since "* ]]   # b, c, d and the checkout question
   run cr status --json
   [ "$(jq -r --arg a "$a" '.[] | select(.id == $a) | [.in_focus, .held] | @csv' <<<"$output")" = "true,false" ]
   run cr watch --once --timeout 5
