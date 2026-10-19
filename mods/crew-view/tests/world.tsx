@@ -102,6 +102,8 @@ export type World = {
   mtimes: Record<string, number>
   /** The prompt box's draft. */
   draft: string
+  /** Command names the person's own commands or skills hold: registering one is refused. */
+  taken: string[]
 }
 
 export const XO_WORLD = (): World => ({
@@ -113,6 +115,7 @@ export const XO_WORLD = (): World => ({
   artifact: ref => ({ exitCode: 0, stdout: `the text of ${ref}\n`, stderr: '' }),
   todo: args => ({ exitCode: 0, stdout: `${args[0]} ${args.slice(1).join(' ')}\n`, stderr: '' }),
   mtimes: {},
+  taken: [],
   draft: '',
 })
 
@@ -167,6 +170,7 @@ export function install(on: On, world: World) {
     return { isFilled: true }
   })
   on('command.register', ($, e) => {
+    if (world.taken.includes(e.name)) return { deny: `"/${e.name}" refused: it is the user's /${e.name}` }
     commands.push(e.name)
     return { value: { command: e.name } }
   })

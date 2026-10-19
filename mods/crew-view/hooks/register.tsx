@@ -15,7 +15,8 @@
 //
 // The commander's todo list (the board's .todo, lib/todo.jq) sits under the band, built-in todo
 // style: the first three items not held by focus mode, `+N more`, and the focus with its held
-// count. `/todo` toggles a pane of all of it: Tab or the arrows walk the rows, and the row with
+// count. `/todo` (`/next` where the person's own /todo command or skill has the name; `/crew
+// todo` either way) toggles a pane of all of it: Tab or the arrows walk the rows, and the row with
 // the ring takes `c` (copy: an artifact's text, an inbox item's, a task's id), `d` (done, pressed
 // twice: `chartroom todo done`; a task's decision only clears when the XO relays the answer), `o`
 // (`/continue <id>` into the prompt) and `a` (show the held items too). `/todo off` hides the
@@ -32,6 +33,9 @@ import type { TodoActionId } from './todo'
 
 const PANE = 'crew'
 const TODO_PANE = 'todo'
+// The todo command's name: the first the engine lets this plugin have. A person's own /todo
+// (a skill, a command file) holds that name, and then the list answers to /next.
+const TODO_NAMES = ['todo', 'next']
 const POLL_MS = 15_000
 const WATCH_MS = 3_000
 
@@ -115,6 +119,8 @@ let pollAgain = false
 let watched = ''
 // Whether this load of the module has registered /crew and started the timer.
 let started = false
+// The name the todo command got (TODO_NAMES), or null while none.
+let todoCommand: string | null = null
 
 /** Reads the board into $.state; never throws, never overlaps a run still going. */
 async function poll($: EngineInterface): Promise<void> {
@@ -350,6 +356,49 @@ async function openTodo($: EngineInterface) {
   return $.ui.open({ id: TODO_PANE, title: 'Todo', focus: true, closeOnEscape: true })
 }
 
+async function toggleTodo($: EngineInterface): Promise<{ text: string }> {
+  if (await isOpen($, true, TODO_PANE)) {
+    await closePane($, TODO_PANE)
+    return { text: 'Todo pane closed.' }
+  }
+  const opened = await openTodo($)
+  return { text: opened.isPlaced ? 'Todo pane opened.' : 'Todo pane is waiting for room: widen the terminal.' }
+}
+
+/**
+ * `/todo` (or the name it got) toggles the pane; `off` hides the list above the prompt (and the
+ * pane) for the session, `on` brings it back; `add <text>` and `done <ref>` run the CLI's.
+ */
+async function todoRun($: EngineInterface, argText: string, name: string): Promise<{ text: string }> {
+  const words = argText.trim().split(/\s+/).filter(Boolean)
+  const [sub, ...rest] = words
+  if (sub === 'off') {
+    await update($, todoOff, () => true)
+    await closePane($, TODO_PANE)
+    return { text: `Todo list off for this session: /${name} on brings it back; /${name} still opens the pane.` }
+  }
+  if (sub === 'on') {
+    await update($, todoOff, () => false)
+    void poll($)
+    return { text: 'Todo list on.' }
+  }
+  if (sub === 'add' || sub === 'done') {
+    const args = sub === 'add' && rest[0] === '--project' && rest.length > 2 ? ['--project', rest[1] ?? '', rest.slice(2).join(' ')] : [rest.join(' ')]
+    if (!args.at(-1)) return { text: sub === 'add' ? `usage: /${name} add [--project P] <text>` : `usage: /${name} done <ref> (as the list shows it: i-7f3a, 21ba/reply-to-review)` }
+    const ran = await runChartroom($, ['todo', sub, ...args])
+    void poll($)
+    if ('error' in ran) return { text: ran.error }
+    return { text: sub === 'add' ? `added ${ran.stdout.trim()}: ${args.at(-1)}` : ran.stdout.trim() }
+  }
+  if (sub) return { text: `usage: /${name} [on|off|add [--project P] <text>|done <ref>]` }
+  return toggleTodo($)
+}
+
+/** `/todo`, or `/next` where the person's own command holds the name: what the hints say. */
+function todoName(): string {
+  return `/${todoCommand ?? 'crew todo'}`
+}
+
 /** Ticks the row off: a first `d` arms it, a second runs `chartroom todo done`, then the ring moves on. */
 async function todoDone($: EngineInterface, row: { key: string; item: TodoItem }) {
   const why = doneRefusal(row.item)
@@ -400,8 +449,19 @@ async function isActive($: EngineInterface): Promise<boolean> {
 async function start($: EngineInterface): Promise<void> {
   if (started) return
   started = true
-  await $.command.register({ name: 'crew', description: "Toggle chartroom's crew pane; /crew <id> opens an item, /crew off hides the band" })
-  await $.command.register({ name: 'todo', description: 'Toggle your todo list (what you owe the crew); /todo off hides it, /todo add <text>, /todo done <ref>' })
+  await $.command.register({ name: 'crew', description: "Toggle chartroom's crew pane; /crew <id> opens an item, /crew todo the todo list, /crew off hides the band" }).catch(() => {})
+  for (const name of TODO_NAMES) {
+    const got = await $.command
+      .register({ name, description: `Toggle your todo list (what the crew waits on you for); /${name} off hides it, /${name} add <text>, /${name} done <ref>` })
+      .then(
+        () => true,
+        () => false,
+      )
+    if (got) {
+      todoCommand = name
+      break
+    }
+  }
   void poll($)
   $.clock.every(POLL_MS, () => void tick($))
   $.clock.every(WATCH_MS, () => void watchFiles($))
@@ -434,6 +494,7 @@ export const register: Register = on => {
   // brings the band back.
   on('command.run', { command: 'crew' }, async ($, e) => {
     const ref = e.args.trim().replace(/^\[|\]$/g, '')
+    if (ref === 'todo' || ref.startsWith('todo ')) return todoRun($, ref.slice(4), 'crew todo')
     if (ref === 'off') {
       await update($, bandOff, () => true)
       await closePane($)
@@ -453,37 +514,12 @@ export const register: Register = on => {
     return { text: opened.isPlaced ? 'Crew pane opened.' : 'Crew pane is waiting for room: widen the terminal.' }
   })
 
-  // `/todo` toggles its pane; `/todo off` hides the list above the prompt (and the pane) for the
-  // session, `/todo on` brings it back; `/todo add <text>` and `/todo done <ref>` run the CLI's.
-  on('command.run', { command: 'todo' }, async ($, e) => {
-    const words = e.args.trim().split(/\s+/).filter(Boolean)
-    const [sub, ...rest] = words
-    if (sub === 'off') {
-      await update($, todoOff, () => true)
-      await closePane($, TODO_PANE)
-      return { text: 'Todo list off for this session: /todo on brings it back; /todo still opens the pane.' }
-    }
-    if (sub === 'on') {
-      await update($, todoOff, () => false)
-      void poll($)
-      return { text: 'Todo list on.' }
-    }
-    if (sub === 'add' || sub === 'done') {
-      const args = sub === 'add' && rest[0] === '--project' && rest.length > 2 ? ['--project', rest[1] ?? '', rest.slice(2).join(' ')] : [rest.join(' ')]
-      if (!args.at(-1)) return { text: sub === 'add' ? 'usage: /todo add [--project P] <text>' : 'usage: /todo done <ref> (as the list shows it: i-7f3a, 21ba/reply-to-review)' }
-      const ran = await runChartroom($, ['todo', sub, ...args])
-      void poll($)
-      if ('error' in ran) return { text: ran.error }
-      return { text: sub === 'add' ? `added ${ran.stdout.trim()}: ${args.at(-1)}` : ran.stdout.trim() }
-    }
-    if (sub) return { text: 'usage: /todo [on|off|add [--project P] <text>|done <ref>]' }
-    if (await isOpen($, true, TODO_PANE)) {
-      await closePane($, TODO_PANE)
-      return { text: 'Todo pane closed.' }
-    }
-    const opened = await openTodo($)
-    return { text: opened.isPlaced ? 'Todo pane opened.' : 'Todo pane is waiting for room: widen the terminal.' }
-  })
+  // The todo command (todoRun). Only the name this plugin holds is answered: a person's own
+  // /todo passes by untouched.
+  for (const name of TODO_NAMES) {
+    on('command.run', { command: name }, async ($, e, next) => (name === todoCommand ? todoRun($, e.args, name) : next(e)))
+  }
+
 
   // The person's close (Esc, the close mark) rests the pane as closePane does.
   on('ui.close', async ($, e, next) => {
@@ -568,7 +604,7 @@ export const register: Register = on => {
           <Button key="todo-close" plain hotkey="q" label="close" role="dismiss" onPress={() => void closePane($, TODO_PANE)} />
         </Box>
         <Text dimColor wrap="truncate">
-          {'  '}Esc closes too · /todo toggles · /todo off hides the list
+          {'  '}Esc closes too · {todoName()} toggles · {todoName()} off hides the list
         </Text>
       </Box>
     )
@@ -615,7 +651,7 @@ export const register: Register = on => {
         )}
         <Text dimColor wrap="truncate">
           {shownItems(list, withHeld).length ? 'the row with the ring: d done (twice), c copy, o continue · ' : ''}
-          {e.props.isFocused ? 'Tab/arrows move' : '/todo closes, ctrl+x tab to use the keys'}
+          {e.props.isFocused ? 'Tab/arrows move' : `${todoName()} closes, ctrl+x tab to use the keys`}
           {err ? ` · last poll: ${err}` : ''}
         </Text>
       </Box>

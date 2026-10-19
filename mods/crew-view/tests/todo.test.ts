@@ -155,3 +155,20 @@ test('focus turning on shows within seconds: a change to focus.json polls at onc
   expect(boards()).toBe(before + 1)
   expect(await band.find({ type: 'Text', text: /🎯 shop, legal, billing \(IR-6\) · 1 held$/ })).toBeDefined()
 })
+
+test("where the person's own /todo holds the name, the list answers to /next and /crew todo; their /todo passes by", async ($, on) => {
+  const world = XO_WORLD()
+  world.taken = ['todo']
+  const theirs: string[] = []
+  on('command.run', { command: 'todo' }, () => {
+    theirs.push('todo')
+    return { text: 'their own todo skill' }
+  })
+  const { w, opens } = await xo($, on, todoJson(), world)
+  expect(w.commands).toEqual(['crew', 'next'])
+  expect((await run($, 'todo')).text).toBe('their own todo skill')
+  expect(theirs).toEqual(['todo'])
+  expect((await run($, 'next')).text).toBe('Todo pane opened.')
+  expect((await run($, 'crew', 'todo off')).text).toBe('Todo list off for this session: /crew todo on brings it back; /crew todo still opens the pane.')
+  expect(opens.map(o => o.id)).toEqual(['todo'])
+})
