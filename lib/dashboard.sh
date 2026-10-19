@@ -93,7 +93,7 @@ dashboard_task_extra() { # <id>
 }
 
 # The board: status rows + extras + inbox + open artifacts, classified into lanes by
-# lib/dashboard/lanes.jq. <pr-states> is an optional JSON file {url: {state, reviewDecision,
+# lib/dashboard/lanes.jq, plus the commander's next steps (.todo, lib/todo.jq). <pr-states> is an optional JSON file {url: {state, reviewDecision,
 # isDraft}} (the server fills it from gh); without it every PR is "unknown" and nothing
 # depends on gh.
 dashboard_json() { # [pr-states-file]
@@ -111,7 +111,8 @@ dashboard_json() { # [pr-states-file]
     --argjson inbox "$(dashboard_inbox)" --argjson prs "$prs" --argjson hours "$hours" \
     --argjson artifacts "$arts" --argjson artifact_counts "$(jq -c "$ARTIFACT_COUNTS_JQ" <<<"$arts")" \
     --arg home "$CR_HOME" --arg version "$CR_VERSION" \
-    -f "$CR_ROOT/lib/dashboard/lanes.jq"
+    -f "$CR_ROOT/lib/dashboard/lanes.jq" |
+    todo_attach "$arts" # .todo, the commander's next steps (lib/todo.sh)
 }
 
 # For `doctor`: the configured bind address, whether an access token exists, and the bind

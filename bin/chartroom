@@ -71,6 +71,8 @@ source "$CR_ROOT/lib/rulings.sh"
 source "$CR_ROOT/lib/sweep.sh"
 # shellcheck source=../lib/artifacts.sh
 source "$CR_ROOT/lib/artifacts.sh"
+# shellcheck source=../lib/todo.sh
+source "$CR_ROOT/lib/todo.sh"
 for _f in "$CR_ROOT"/lib/backends/*.sh; do
   # shellcheck source=/dev/null
   source "$_f"
@@ -1208,6 +1210,16 @@ chartroom - run a crew of coding agents from one agent session (the XO)
   chartroom artifact copy <ref>           put the text on the clipboard (CHARTROOM_CLIPBOARD,
                                           else pbcopy, wl-copy, xclip, xsel), else print it
   chartroom artifact done <ref>           sent or run: it stops showing as open
+  chartroom todo [--all] [--json]         the commander's next steps: open inbox items, open
+                                          artifacts to send or run, tasks waiting on their word
+                                          (decision, blocked, ready); breaking first, then by
+                                          the dates in the text, then oldest. While focus mode
+                                          is on, only what it does not hold (--all: those too)
+  chartroom todo done <ref>               tick one off: removes the inbox line (i-xxxx) or marks
+                                          the artifact (<id>/<slug>) done; a task clears when
+                                          the XO relays the answer
+  chartroom todo add [--project P] <text> the commander's own item, kept as an inbox item;
+                                          prints its id
   chartroom rule add --topic T [--supersedes r-x|-] [--src S] <text>
                                           record a lasting commander ruling in rulings.log
                                           (append-only); the newest ruling in a topic wins and
@@ -1267,6 +1279,7 @@ case "$cmd" in
   install-skills) cmd_install_skills "$@" ;;
   ls) cmd_status "$@" ;;
   show) cmd_show "$@" ;;
+  todo) cmd_todo "$@" ;;
   -h|--help) cmd_help ;;
   -v|--version) cmd_version ;;
   *) die "unknown command '$cmd' (try: chartroom help)" ;;
