@@ -186,6 +186,20 @@
   .banner { margin: 12px 20px 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--needs);
             color: var(--needs); background: color-mix(in srgb, var(--needs) 8%, transparent); display: none; overflow-wrap: anywhere; }
 
+  /* focus mode: the held count, always in view while a focus is on; other projects' cards dim
+     (or hide, by the strip's toggle) */
+  .focusbar { margin: 12px 20px 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--wait);
+              background: color-mix(in srgb, var(--wait) 12%, transparent); display: flex; flex-wrap: wrap;
+              align-items: center; gap: 6px 14px; overflow-wrap: anywhere; }
+  .focusbar[hidden] { display: none; }
+  .focusbar .what { font-weight: 600; }
+  .focusbar .held { font: 600 18px/1 var(--display); color: var(--wait); font-variant-numeric: tabular-nums lining-nums; }
+  .focusbar .when { color: var(--muted); font: 11.5px/1.3 var(--mono); }
+  .focusbar .theme { margin-left: auto; }
+  .card.out { opacity: .42; filter: saturate(.25); }
+  .card.out:hover, .card.out:focus-within { opacity: .9; filter: none; }
+  .badge.held { color: var(--wait); border-color: color-mix(in srgb, var(--wait) 55%, transparent); }
+
   /* lanes */
   main { position: relative; display: grid; gap: 18px; padding: 16px 20px 48px; grid-template-columns: repeat(auto-fit, minmax(256px, 1fr));
          align-items: start; }
@@ -390,7 +404,7 @@
   [data-theme=hud] .brand h1::after { display: none; }
   [data-theme=hud] .meta, [data-theme=hud] .instruments { font-family: var(--mono); text-transform: uppercase; letter-spacing: .04em; }
   [data-theme=hud] .theme, [data-theme=hud] .gauge, [data-theme=hud] .badge, [data-theme=hud] .sid,
-  [data-theme=hud] .more, [data-theme=hud] .kind, [data-theme=hud] .banner, [data-theme=hud] .att { border-radius: 2px; }
+  [data-theme=hud] .more, [data-theme=hud] .kind, [data-theme=hud] .banner, [data-theme=hud] .focusbar, [data-theme=hud] .att { border-radius: 2px; }
   [data-theme=hud] .gauge b, [data-theme=hud] .lane h2 .n { font-family: var(--display); font-weight: 700; }
   [data-theme=hud] .gauge .lamp, [data-theme=hud] .sig.dot::before, [data-theme=hud] .sig.dot::after { border-radius: 1px; }
   [data-theme=hud] .sig.ring::before { border-radius: 1px; border-style: dashed; }
@@ -467,7 +481,7 @@
     .log { margin: 10px 16px 0; grid-template-columns: 1fr; }
     .log li { grid-template-columns: 8ch minmax(0, 1fr); }
     .log .who { display: none; }
-    .banner { margin: 10px 16px 0; }
+    .banner, .focusbar { margin: 10px 16px 0; }
     main { padding: 14px 16px 40px; }
     /* no hover to read a cut line on a phone: show up to three lines of it instead */
     .card .last { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
@@ -538,6 +552,7 @@
   </div>
   <nav class="counts" id="counts" aria-label="lane counts"></nav>
 </header>
+<div class="focusbar" id="focusbar" role="status" hidden></div>
 <section class="log" id="log" hidden><h3 id="log-title">Ship’s log</h3><ol id="log-list"></ol></section>
 <div class="banner" id="banner"></div>
 <main id="lanes"><div class="reticle off" id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><span class="tagline" id="lock-tag"></span></div></main>
@@ -770,7 +785,8 @@ function card(c, lane) {
   const sub = el("div", { class: "sub" });
   if (c.project && !lead) sub.append(el("span", { text: c.project }));
   sub.append(el("span", { class: "badge accent", text: c.type === "task" ? c.reason || c.state : "inbox" }));
-  const node = el("article", { class: "card m-" + motion + (c.type === "inbox" ? " inbox" : "") + (fresh ? " fresh" : "") },
+  if (c.held) sub.append(el("span", { class: "badge held", text: "held", title: "focus mode holds it until focus off" }));
+  const node = el("article", { class: "card m-" + motion + (c.type === "inbox" ? " inbox" : "") + (fresh ? " fresh" : "") + (c.in_focus === false ? " out" : "") },
     el("div", { class: "gleam", "aria-hidden": "true" }),
     motion === "attn" ? el("div", { class: "glow", "aria-hidden": "true" }) : null,
     motion === "attn" ? el("div", { class: "brackets", "aria-hidden": "true" }) : null,
@@ -880,18 +896,56 @@ function buildFrame() {
   });
 }
 
+// Focus mode: while d.focus is on, the gauges, the alert and the tab count only what is in
+// focus (the strip carries the held count), and out-of-focus cards dim, or hide when the strip's
+// toggle says so (remembered in this browser).
+const FOCUS_VIEWS = ["dim", "hide"];
+let focusView = stored("chartroom-focus-view", FOCUS_VIEWS) || "dim";
+function inFocus(c) { return c.in_focus !== false; }
+function laneItems(d, k) {
+  const items = d.lanes[k] || [];
+  return d.focus && focusView === "hide" ? items.filter(inFocus) : items;
+}
+function focusCount(d, k) { return d.focus ? (d.lanes[k] || []).filter(inFocus).length : d.counts[k] || 0; }
+// The strip is built once and updated in place, so its button keeps a click or keyboard focus
+// across refreshes.
+const focusBar = document.getElementById("focusbar");
+const focusWhat = el("span", { class: "what" }), focusHeld = el("span", { class: "held" }), focusWhen = el("span", { class: "when" });
+const focusToggle = el("button", { class: "theme", type: "button" });
+focusToggle.addEventListener("click", () => {
+  focusView = focusView === "hide" ? "dim" : "hide";
+  store("chartroom-focus-view", focusView);
+  if (last) render(last);
+});
+focusBar.append(focusWhat, el("span", {}, focusHeld, " held"), focusWhen, focusToggle);
+focusBar.title = "Other projects' questions and results wait until focus off (chartroom focus off)";
+function renderFocus(d) {
+  if (!d.focus) { focusBar.hidden = true; return; }
+  const f = d.focus, scope = (f.scope || []).length ? " (" + f.scope.join(", ") + ")" : "";
+  focusWhat.textContent = "🎯 Focus: " + f.projects.join(", ") + scope;
+  focusHeld.textContent = String(f.held);
+  if (focusWhen.dataset.key !== f.since + "|" + f.until) {
+    focusWhen.dataset.key = f.since + "|" + f.until;
+    focusWhen.replaceChildren("since ", ticker("since", f.since));
+    if (f.until) focusWhen.append(" · ends ", ticker("until", f.until));
+  }
+  focusToggle.textContent = focusView === "hide" ? "show other projects" : "hide other projects";
+  focusBar.hidden = false;
+}
+
 function render(d) {
   document.getElementById("meta").textContent =
     d.home + " · updated " + new Date(d.generated_at).toLocaleTimeString() +
     (d.pr_enrichment && d.pr_enrichment.enabled ? " · PR states via gh" : "");
-  const max = Math.max(1, ...LANES.map(([k]) => d.counts[k] || 0));
+  renderFocus(d);
+  const max = Math.max(1, ...LANES.map(([k]) => focusCount(d, k)));
   for (const [k] of LANES) {
-    const v = d.counts[k] || 0, g = gauges[k];
+    const v = focusCount(d, k), g = gauges[k];
     tween(g.b, v);
     g.bar.style.transform = "scaleX(" + (v / max).toFixed(3) + ")";
     if (k === "needs_you") g.a.classList.toggle("hot", v > 0);
   }
-  document.body.classList.toggle("alert", (d.counts.needs_you || 0) > 0);
+  document.body.classList.toggle("alert", focusCount(d, "needs_you") > 0);
 
   // First: where every card is now.
   const animate = !firstRender && !reduced.matches && !document.hidden;
@@ -900,9 +954,10 @@ function render(d) {
 
   const next = new Map(), entering = [], flashing = [];
   for (const [k] of LANES) {
-    const items = d.lanes[k] || [];
+    const items = laneItems(d, k);
+    const hidden = (d.lanes[k] || []).length - items.length;
     const { n, cards, foot } = sections[k];
-    tween(n, items.length);
+    tween(n, focusCount(d, k));
     const limit = SHOW[k] && !expanded[k] ? SHOW[k] : Infinity;
     const want = items.slice(0, limit).map((c) => {
       let key = keyOf(c);
@@ -928,7 +983,8 @@ function render(d) {
     while (ref) { const nx = ref.nextSibling; ref.remove(); ref = nx; }
 
     foot.replaceChildren();
-    if (!items.length) foot.append(el("div", { class: "empty", text: k === "needs_you" ? theme().calm : "None." }));
+    if (!items.length) foot.append(el("div", { class: "empty", text: k === "needs_you" && !hidden ? theme().calm : "None." }));
+    if (hidden) foot.append(el("div", { class: "empty", text: hidden + " from other projects hidden by focus" }));
     if (items.length > limit) {
       const b = el("button", { class: "more", type: "button", text: "show all " + items.length });
       b.addEventListener("click", () => { expanded[k] = true; render(d); });
@@ -976,7 +1032,8 @@ function render(d) {
   renderRadar(d);
   relock();
   firstRender = false;
-  document.title = (d.counts.needs_you ? "(" + d.counts.needs_you + ") " : "") + "chartroom";
+  const needs = focusCount(d, "needs_you");
+  document.title = (needs ? "(" + needs + ") " : "") + "chartroom" + (d.focus ? " · 🎯 " + d.focus.held + " held" : "");
 }
 
 function keyOf(c) {
@@ -1047,7 +1104,7 @@ function autoLock(force) {
   if (!theme().reticle) { lockOn(null); return; }
   if (hovering && hovering.isConnected && !force) return;
   for (const k of ["needs_you", "in_progress"]) {
-    const rows = [...sections[k].cards.children];
+    const rows = [...sections[k].cards.children].filter((n) => !n.classList.contains("out"));
     if (!rows.length) continue;
     lockIx = force ? 0 : (lockIx + 1) % rows.length;
     lockOn(rows[lockIx]);
@@ -1056,10 +1113,10 @@ function autoLock(force) {
   lockOn(null);
 }
 
-// Ship's log: the newest events across every task, new ones washing in.
+// Ship's log: the newest events across every task (in focus, while focus mode is on), new ones washing in.
 function renderLog(d) {
   const all = [];
-  for (const [k] of LANES) for (const c of d.lanes[k] || []) if (c.type === "task" && c.last_event && c.last_at) all.push(c);
+  for (const [k] of LANES) for (const c of d.lanes[k] || []) if (c.type === "task" && c.last_event && c.last_at && (!d.focus || inFocus(c))) all.push(c);
   all.sort((a, b) => ms(b.last_at) - ms(a.last_at));
   const rows = all.slice(0, LOG_ROWS);
   const box = document.getElementById("log");
