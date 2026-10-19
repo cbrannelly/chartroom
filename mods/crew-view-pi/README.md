@@ -28,14 +28,35 @@ for Claude Code: chartroom's crew, live inside the XO's pi session.
   | `b`, Esc | back to the lanes |
   | `q` | close the browser |
 
+- **Your todo list under the band**, the same as the Claude Code mod's: the first three things you
+  owe the crew (`chartroom todo`), `+N more`, and while focus mode is on, the focus and how many
+  items it holds:
+
+  ```
+  ☐ [billing] 9c1e blocked: prod is down, need the DB password  /todo
+  ☐ [legal] i-7f3a sign the NDA by 2026-10-22 · due 10-22
+  ☐ [shop] 108a decide: pick A or B (recommend A)
+    +2 more · 🎯 shop (IR-6) · 4 held
+  ```
+
+  **`/todo`** opens a browser of all of it: ↑/↓ (or `j`/`k`) move the `▸`, and the row it is on
+  takes `c` (copy an artifact's text, an inbox item's, a task's id), `d` (done, pressed twice:
+  `chartroom todo done`; a task says it clears when the XO relays your answer), `o` (closes the
+  browser and puts `/skill:continue <id>` in an empty editor) and `a` (show the held items too);
+  `q` or Esc closes it. `/todo off` hides the list (kept across `/reload`, as `/crew off` is),
+  `/todo on` brings it back, and `/todo add [--project P] <text>` and `/todo done <ref>` run the
+  CLI's. A change to `focus.json` or `inbox.md` reads the board within 3 seconds. Checked live on
+  pi 0.87.1: the list under the band, the browser, `d` twice on an inbox item, `d` on a decision,
+  `o`, `/todo off` and `on`, and an item added from another terminal showing within seconds.
 - **`/crew off`** hides the band for the rest of the session and **`/crew on`** brings it back;
   a session entry keeps the choice across `/reload`. `/crew` still opens the browser. While the
-  band is off and the browser closed, nothing reads the board.
+  band and the todo list are off and no browser is open, nothing reads the board.
 
 It reads `chartroom board --json` (chartroom on PATH, else `~/.local/bin/chartroom`) when it
-wakes and every 15 seconds after, and `chartroom show <id> --json` when an item opens. The lane,
-band and detail text come from the Claude Code mod's own helpers (`../crew-view/hooks/crew.ts`),
-so the two views never disagree.
+wakes and every 15 seconds after (the todo list rides in the same JSON), and `chartroom show <id>
+--json` when an item opens. The lane, band, detail and todo text come from the Claude Code mod's
+own helpers (`../crew-view/hooks/crew.ts`, `../crew-view/hooks/todo.ts`), so the two views never
+disagree.
 
 ## XO only, once the skill is loaded
 

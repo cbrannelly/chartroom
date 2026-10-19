@@ -80,7 +80,7 @@ Per agent:
 
 ### A live crew view in Claude Code (and pi)
 
-`mods/crew-view` is a Claude Code mod (verified on Claude Code 2.1.302) that draws the crew inside the XO's
+`mods/crew-view` is a Claude Code mod (verified on Claude Code 2.1.302, the todo list on 2.1.303) that draws the crew inside the XO's
 session: a one-line band above the prompt (`⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · ✅ 1`,
 one emoji per lane, every item that needs you labelled with its project) and a `/crew` pane that
 browses the board's items, the dashboard inside Claude Code. Tab or the arrows walk the items,
@@ -89,7 +89,15 @@ outcome, PRs, artifacts and where the worker runs. From there, `c` puts `/contin
 prompt (Enter runs it), `y` copies the id, `p` a PR URL, `a` an artifact, `r` reads the report,
 `b` goes back; `/crew <id>` opens an item directly. `q` or Esc closes the pane, `/crew` toggles
 it, and `/crew off` hides the band for the session. It polls `chartroom board --json` every 15
-seconds and reads an item with `chartroom show <id> --json`. Install it at user scope:
+seconds and reads an item with `chartroom show <id> --json`.
+
+Under the band sits [your todo list](#your-next-steps-the-todo-list), styled like Claude Code's
+own: the first three things you owe the crew (`☐ [legal] i-7f3a sign the NDA · due 10-22`),
+`+N more`, and while focus mode is on, the focus and how many items it holds. `/todo` opens a
+pane of all of it, where the row with the ring takes `c` (copy an artifact's text), `d` (done,
+pressed twice), `o` (`/continue <id>` into the prompt) and `a` (show the held items too); `/todo
+off` hides the list. Where your own `/todo` command or skill already has the name, the list
+answers to `/next` instead (and to `/crew todo` either way). Install it at user scope:
 
 ```
 /plugin install crew-view@chartroom
@@ -100,7 +108,7 @@ It stays inert (no command, timer, process or drawing) until the session loads t
 is the chartroom home, not under `worktrees/`, with no `CHARTROOM_TASK`. Installed from a local checkout (`claude plugin marketplace add <checkout>`),
 `/reload-plugins` picks up edits. See [mods/crew-view/README.md](mods/crew-view/README.md).
 
-`mods/crew-view-pi` is the same band and browser for [pi](https://pi.dev) (0.87 or newer), gated
+`mods/crew-view-pi` is the same band, browser and todo list (`/todo`) for [pi](https://pi.dev) (0.87 or newer), gated
 the same way (`/skill:captain` or `/skill:chartroom` wakes it): `pi install <checkout>/mods/crew-view-pi`,
 for example `pi install ~/.local/share/chartroom/mods/crew-view-pi`. See
 [mods/crew-view-pi/README.md](mods/crew-view-pi/README.md).
@@ -256,7 +264,8 @@ project a question is for at a glance), age, the last worker event, PR/MR links 
 as plain text. A task or inbox card with open [artifacts](#artifacts-drafts-that-outlive-the-chat)
 (drafts for you to send or run) shows a chip for each: one click copies the text and opens it,
 with a copy button beside it. Approvals given in chat but not yet in a brief are listed under
-Needs you.
+Needs you. Above the lanes, a "Your next steps" strip shows [your todo list](#your-next-steps-the-todo-list):
+the first five items, each with its short id (a click copies `/continue <id>`).
 
 How it is built, and what it promises:
 
@@ -437,6 +446,45 @@ chartroom artifact done 21ba/reply-to-the-review   # sent: it stops showing as o
 
 The chartroom skill has the XO save anything it drafts for you to send or run as an artifact
 before showing it, and give you the ref, never the text in chat alone.
+
+## Your next steps: the todo list
+
+What you owe the crew, in one list, made from the records chartroom already keeps, so nothing is
+typed in twice:
+
+- open inbox items under "Waiting on the commander" (the XO's questions, and your own items);
+- open artifacts to send (`message`) or run (`runbook`); notes are not on it;
+- tasks waiting on your word: a `decision`, a `blocked` worker, finished work to land (`ready`).
+
+```bash
+chartroom todo                        # the list (--json for the views; --all with focus mode's held items)
+chartroom todo done i-7f3a            # removes the inbox line
+chartroom todo done 21ba/reply-to-the-review   # marks the artifact done
+chartroom todo add --project shop "renew the cert by 2026-10-22"   # your own item, kept as an inbox item
+```
+
+```
+☐ 9c1e    [billing] blocked: prod is down, need the DB password  breaking  2h
+☐ i-7f3a  [legal] sign the NDA by 2026-10-22  due 2026-10-22  1d
+☐ 108a    [shop] decide: pick A or B (recommend A)  3d
+☐ 21ba/reply-to-the-review  [shop] send: Reply to the review  5h
+```
+
+- **Order.** Breaking first (a `[breaking]` or `[urgent]` mark, a `--breaking` report, or the word
+  urgent or asap), then by the earliest date in the text (`2026-10-22`, `not before 2026-10-19
+  06:00Z`), then oldest first.
+- **Ticking off.** `todo done` changes the record the item came from: it removes the inbox line
+  (the section reads `- (none)` again once it is empty) or marks the artifact done. An inbox
+  item's artifacts outlive its line, so a message to send stays on the list after its question is
+  answered. A task is never ticked here: a decision clears when the XO relays your answer, and
+  finished work when it lands.
+- **Focus mode.** While `chartroom focus` is on, the list shows only what focus mode does not
+  hold, and the focus line says how many items it holds (`--all` shows them). Focus mode alone
+  decides what is held: urgency only orders the list. An artifact follows its owner's card. The
+  list counts its own items, artifacts included, so its held count can differ from `status`'s.
+- **Where it shows.** `board --json` (and the dashboard's JSON) carries it as `todo`, so the
+  [crew views](#a-live-crew-view-in-claude-code-and-pi) draw it under their band with no second
+  poll, and the dashboard shows a "Your next steps" strip above the lanes.
 
 ## Housekeeping: sweep
 
@@ -675,7 +723,7 @@ through your forge's CLI.
 shellcheck -x -S warning bin/chartroom lib/*.sh lib/backends/*.sh install.sh scripts/*.sh test/stub-agent test/windows-smoke.sh test/fakes/*
 bats test/                 # no herdr/tmux/cmux/claude/codex needed: fakes and a stub agent
 scripts/privacy-gate.sh    # no personal data in tracked files
-claude plugin test mods/crew-view   # the Claude Code mod's tests (verified on Claude Code 2.1.302)
+claude plugin test mods/crew-view   # the Claude Code mod's tests (verified on Claude Code 2.1.302 and 2.1.303)
 ```
 
 Maintainers: merge by fast-forward pushing `main` from a local clone whose commits use the

@@ -1,6 +1,6 @@
 # crew-view
 
-A Claude Code mod (function hooks; built and verified on Claude Code 2.1.302) that shows the chartroom crew
+A Claude Code mod (function hooks; built and verified on Claude Code 2.1.302, the todo list on 2.1.303) that shows the chartroom crew
 live inside the XO's session:
 
 - **A band above the prompt**, one line, one emoji per lane with its count, every item that
@@ -31,8 +31,8 @@ live inside the XO's session:
   Every view's first row reads `q: close`. `q` or Esc closes the pane from any view, and so does
   Esc at an idle, empty prompt once the keys are back there. `/crew` toggles the pane, and a
   closed pane opens next on the lanes. `/crew off` hides the band, and closes the pane, for the
-  rest of the session (`/crew` still opens the pane); `/crew on` brings the band back. While the
-  band is off and the pane closed, nothing reads the board.
+  rest of the session (`/crew` still opens the pane); `/crew on` brings the band back. The todo
+  list under it stays until `/todo off`.
 
   An item opens into its detail:
 
@@ -70,9 +70,48 @@ live inside the XO's session:
   The line under the actions says what the last one did (copied, in the prompt, or why not).
   There are no write actions beyond these: nothing merges, steers or closes a task from the pane.
 
+- **Your todo list under the band**, styled like Claude Code's own todo list: what you owe the
+  crew (`chartroom todo`: open inbox items, open messages and runbooks to send or run, tasks
+  waiting on your word), breaking first, then by due date, then oldest:
+
+  ```
+  ⚓ 🏃 3 · 🙋 2 [shop] 108a, [billing] 9c1e · ✅ 1                              [ crew ]
+  ☐ [billing] 9c1e blocked: prod is down, need the DB password                   [ todo ]
+  ☐ [legal] i-7f3a sign the NDA by 2026-10-22 · due 10-22
+  ☐ [shop] 108a decide: pick A or B (recommend A)
+    +2 more · 🎯 shop (IR-6) · 4 held
+  ```
+
+  The first three items show, then `+N more`; a breaking one is red, and a due date stays in
+  view however narrow the terminal. While focus mode is on, only what it does not hold shows,
+  and the last line names the focus and how many items it holds (that line alone when nothing
+  in focus is waiting on you). With nothing owed and focus off, nothing is drawn. `[ todo ]`
+  (hotkey `t` once the band has the keys) opens the pane.
+- **A `/todo` pane of all of it.** Tab or the arrows walk the rows, and the row with the ring
+  (marked `▸`; Enter on a row selects it too) takes the actions:
+
+  | key | action |
+  | --- | --- |
+  | `c` | copy: an artifact's text (`chartroom artifact show <ref>`), an inbox item's text, a task's id |
+  | `d` | done, pressed twice (the first says what the second ticks off): `chartroom todo done <ref>` removes the inbox line or marks the artifact done, and the ring moves to the next row. A task cannot be ticked: the pane says it clears when the XO relays your answer |
+  | `o` | continue: `/continue <id>` into an empty prompt (a draft is kept and the line copied) |
+  | `a` | show or hide the items focus mode holds (under HELD BY FOCUS) |
+  | `q`, Esc | close the pane |
+
+  `/todo` toggles the pane, `/todo off` hides the list above the prompt for the session (`/todo
+  on` brings it back), and `/todo add [--project P] <text>` and `/todo done <ref>` run the CLI's.
+  **Where your own `/todo` command or skill already has the name** (Claude Code refuses a
+  plugin's command that would shadow it), the list answers to **`/next`**, and your `/todo`
+  passes by untouched; `/crew todo` (with the same `off`, `on`, `add`, `done`) works either way,
+  and the pane's header names the one in force.
+
 It reads `chartroom board --json` (chartroom on PATH, else `~/.local/bin/chartroom`) when it
-wakes, every 15 seconds after, and whenever the pane opens; `chartroom show <id> --json` when an
-item opens, and again with each poll while it is open.
+wakes, every 15 seconds after, and whenever a pane opens; the todo list rides in the same JSON
+(`.todo`), so it costs no second read. Every 3 seconds it stats `focus.json` and `inbox.md` in the
+home (no process), and reads the board at once when either changed: focus mode turning on or off,
+an item added or ticked off elsewhere, shows within seconds, without a restart. It reads
+`chartroom show <id> --json` when an item opens, and again with each poll while it is open. With
+the band and the list both off and both panes closed, nothing is read.
 
 ### What this Claude Code build supports
 
@@ -94,6 +133,15 @@ instead of on `q: close` (and, in the test kit, on the row last opened). In the 
 reach its own `ui.close` hook, so `q` and `/crew` reset the pane themselves and the hook handles
 the person's closes. The frame's close mark (`✕`, a mouse click) is the person's close too; it
 was not clicked in the live check.
+
+The todo list, checked live on Claude Code 2.1.303 (a throwaway home, the mod from
+`--plugin-dir`): the band draws the list under the crew line; `$.command.register` refuses
+`/todo` where the person's own `todo` skill holds it ("it is the user's /todo"), and the list
+then answers to `/next`; the `ui.focus` event follows the ring as the arrows move it, so `d` and
+`c` act on the row it is on; `d` twice removed the inbox line and moved the ring to the next row;
+`o` put `/continue <id>` in the prompt; an item added from another terminal, and focus mode
+turning off and on (with the focus-mode work laid over this branch), showed in the band within
+four seconds. `c` was not pressed live (it writes the machine's clipboard); the tests cover it.
 
 ## XO only, once the skill is loaded
 
@@ -150,5 +198,13 @@ copy the declarations the plugin-authoring skill names into
 `.claude-plugin/types/claude-code/index.d.ts`.
 
 `hooks/crew.ts` holds the pure parts (home resolution, board and detail parsing, band, pane
-and detail text, the actions); `hooks/register.tsx` the hooks; `types/index.d.ts` the `$.state`
-contract. `mods/crew-view-pi` imports `hooks/crew.ts` too, so a change there changes both.
+and detail text, the actions); `hooks/todo.ts` the todo list's (parsing the board's `.todo`, the
+band's rows, the pane's rows, its actions); `hooks/register.tsx` the hooks; `types/index.d.ts`
+the `$.state` contract. `mods/crew-view-pi` imports `hooks/crew.ts` and `hooks/todo.ts` too, so a
+change there changes both.
+
+The todo list lives in this mod, not a sibling one, because it needs everything this one already
+has: the XO-only gating and the wake on the skill, the board poll (the list rides in its JSON),
+the chartroom runner, the clipboard and `/continue` helpers, and the same `$.state`. A sibling
+plugin installs as a folder of its own, so it could not import these; it would carry a copy of
+the gating and run a second poll every 15 seconds.

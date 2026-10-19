@@ -240,7 +240,8 @@ others read between steps. `close` only marks it closed; its directory is never 
   hand-editing that section, run `chartroom inbox tag`, and `chartroom inbox project <i-id>
   <project>` labels an item that has none). When the commander approves something in chat that is not yet written into a
   task brief, add a dated line under "Approvals given in chat, not yet in a brief". Remove the
-  line once it is answered or recorded in a brief.
+  line once it is answered or recorded in a brief (`chartroom todo done <i-id>` removes a
+  Waiting line).
 - **Artifacts.** Text for the commander to send or run (a message, a reply, commands, a
   checklist), yours or a worker's, is saved before you show it, never left in chat alone:
   `chartroom artifact add <task-or-inbox-id> --kind message|runbook|note --title "<one line>" <file|->`.
@@ -249,6 +250,17 @@ others read between steps. `close` only marks it closed; its directory is never 
   dashboard card shows it as a chip that opens and copies it, and `chartroom artifact copy <ref>`
   copies it. A runbook is the commands themselves, ready to paste. To revise, `add` the same
   title again. Once the commander says it went out or ran, `chartroom artifact done <ref>`.
+- **The commander's todo list.** `chartroom todo` is the commander's own list of next steps,
+  made from your records: the open Waiting inbox items, the open message and runbook artifacts,
+  and the tasks in `decision`, `blocked` or `ready`. It shows under the crew view's band in
+  Claude Code and pi (`/todo`, or `/next` where their own `/todo` has the name) and atop the
+  dashboard, so keep it true: every question you wait on goes in the inbox, every draft to send
+  or run in an artifact, and what is answered or sent comes off. When the commander asks you to
+  remember something for them ("remind me to…", "add to my list"), `chartroom todo add --project
+  <project> "<text>"`; a date in the text orders it (`renew the cert by 2026-10-22`). The
+  commander can tick items off themselves (`d` in the pane, `chartroom todo done`), which
+  removes the inbox line or closes the artifact: re-read `inbox.md` before you treat a question
+  as still open. A task's decision never comes off the list until you relay the answer.
 
 ## Steering the tools themselves
 

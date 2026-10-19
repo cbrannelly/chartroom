@@ -7,6 +7,30 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
+- `chartroom todo`: your next steps, one list of what you owe the crew, made from the records
+  chartroom already keeps: open "Waiting on the commander" inbox items, open `message` and
+  `runbook` artifacts, and tasks in `decision`, `blocked` or `ready`. Breaking first (a
+  `[breaking]` or `[urgent]` mark, a breaking card, or the word urgent or asap), then by the
+  earliest date in the text, then oldest. `todo done <ref>` removes the inbox line (restoring
+  `- (none)` when the section empties) or marks the artifact done; a task is never ticked, it
+  clears when the XO relays the answer. `todo add [--project P] <text>` keeps your own item as an
+  inbox item. `--all` shows what focus mode holds, `--json` the list. `lib/todo.jq` computes it
+  from the board, and `board --json` (so the dashboard's JSON) carries it as `todo`; nothing else
+  in the board changes. It reads focus mode's marks (each card's `held`, `in_focus`, `breaking`,
+  the board's `focus`) and never decides a hold: urgency only orders the list.
+- crew-view 0.4.0: your todo list under the band, built-in todo style (the first three items not
+  held, `+N more`, the focus and its held count), and a `/todo` pane of all of it where the row
+  with the ring takes `c` (copy), `d` (done, pressed twice), `o` (`/continue <id>`) and `a` (the
+  held items). `/todo off` hides the list, `/todo add` and `/todo done` run the CLI's. Where the
+  person's own `/todo` command or skill holds the name, the list answers to `/next`, and `/crew
+  todo` works either way. A stat of `focus.json` and `inbox.md` every 3 s reads the board at once
+  when either changes, so focus mode turning on or off shows without a restart. Registering a
+  command no longer stops the mod's start when Claude Code refuses it.
+- The pi crew view gains the same list under its band and a `/todo` browser (`o` puts
+  `/skill:continue <id>` in the editor); `/todo off` is kept across `/reload`.
+- The dashboard shows a "Your next steps" strip above the lanes: the first five items not held,
+  each with its short id (a click copies `/continue <id>`) and due date, and the focus with its
+  held count.
 - Artifacts: drafts that outlive the chat. `chartroom artifact add <id> --kind message|runbook|note
   --title T <file|->` keeps text the XO drafted for the commander (a message to send, commands to
   run, a note) with a task (`tasks/<id>/artifacts/<slug>.md`, plus a `.json` with title, kind,
