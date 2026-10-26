@@ -793,7 +793,7 @@ to the config file.
 
 | Key | Default | |
 |---|---|---|
-| `CHARTROOM_HOME` | `~/.chartroom` | legacy: `CAP_HOME`; then the registered home the current directory is (or lies in); then an existing `~/.captain` |
+| `CHARTROOM_HOME` | `~/.chartroom` | read in this order: the environment, legacy `CAP_HOME`, the registered home the current directory is (or lies in), the config file, then an existing `~/.captain` |
 | `CHARTROOM_PROJECT_ROOTS` | *(empty)* | colon-separated dirs searched by `chartroom project <name>` |
 | `CHARTROOM_WORKSPACE` | `chartroom-crew` | herdr workspace / cmux workspace / tmux session name |
 | `CHARTROOM_BACKEND_ORDER` | see above | space- or comma-separated |
