@@ -22,6 +22,7 @@ home_tilde() { local p="$1"; if [[ "$p" == "$HOME" || "$p" == "$HOME"/* ]]; then
 # A path with symlinks resolved, also one not created yet (through its nearest existing parent).
 phys_dir() { # <path>
   local p="${1%/}" rest="" base=""
+  [[ "$p" == /* ]] || p="$PWD/$p"
   while [[ -n "$p" && ! -d "$p" ]]; do rest="/${p##*/}$rest"; p="${p%/*}"; done
   [[ -n "$p" ]] && base="$(cd "$p" 2>/dev/null && pwd -P)"
   [[ "$base" == / ]] && base=""

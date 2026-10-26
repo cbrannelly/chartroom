@@ -196,7 +196,7 @@ cmd_init() {
   fi
   if [[ -n "$name" ]]; then
     if [[ "$chk" == same ]]; then echo "home $name: already registered"
-    else homes_register "$name" "$CR_HOME"; echo "registered home $name in $CR_HOMES_FILE"; fi
+    else homes_register "$name" "$(cd "$CR_HOME" && pwd)"; echo "registered home $name in $CR_HOMES_FILE"; fi
   fi
   if [[ -z "$CR_PROJECT_ROOTS" ]]; then
     local c found=()

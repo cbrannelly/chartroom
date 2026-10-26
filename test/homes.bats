@@ -58,6 +58,10 @@ snapshot() { find "$@" -type f -exec cksum {} + | sort; }
   run env CHARTROOM_HOME="$BATS_TEST_TMPDIR/x" "$CHARTROOM" init --name Bad_Name
   [ "$status" -ne 0 ]; [[ "$output" == *"a home's name is lowercase"* ]]
   [ ! -e "$BATS_TEST_TMPDIR/x" ]
+  # a relative home is registered by its full path
+  run bash -c 'cd "$1" && CHARTROOM_HOME=rel "$2" init --name rel' _ "$BATS_TEST_TMPDIR" "$CHARTROOM"
+  [ "$status" -eq 0 ]
+  grep -qx "rel=$BATS_TEST_TMPDIR/rel" "$HOMES"
 }
 
 @test "homes: list, add without writing in the home, path, rm, and the warnings" {
