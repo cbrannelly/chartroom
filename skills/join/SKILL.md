@@ -28,8 +28,9 @@ this skill's directory through symlinks and go two levels up,
 `CR="$(cd -P "<this skill's directory>" && cd ../.. && pwd)/bin/chartroom"`. Only if that file
 does not exist, use `chartroom` from PATH. Call it `$CR` below.
 
-**Home.** If the user named a home: a path is used as is; a bare name `x` means `~/.x` (or
-`~/x` if only that exists). Otherwise use `$CHARTROOM_HOME` if set, else `~/.chartroom`.
+**Home.** If the user named a home: a path is used as is; a bare name `x` is the registered
+home of that name (`$CR homes path x`), else `~/.x` (or `~/x` if only that exists). Otherwise
+use `$CHARTROOM_HOME` if set, else `~/.chartroom`.
 Prefix every `$CR` command with `CHARTROOM_HOME=<home>` when it is not the default. If the
 home does not exist, say so in one line and stop.
 

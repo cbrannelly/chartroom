@@ -7,6 +7,30 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
+- Several XOs on one machine: one home each (one per company or client, say), side by side.
+  A home may keep its own `config` (`KEY=VALUE`, as the config file), which wins over
+  `~/.config/chartroom/config` for every key but `CHARTROOM_HOME` and `CHARTROOM_PLATFORM`.
+  `chartroom init --name <n>` writes it with a workspace (`<n>-crew`) and a dashboard port (the
+  next free from 4518) of the home's own, and adds the home to a list of homes, `homes` next to
+  the config file (`name=path` lines). `chartroom homes [--json]` lists them (path, workspace,
+  port, open tasks, dashboard) and warns about a shared workspace or port, a nested home or a
+  missing path; `homes add <name> [<path>]` registers an existing home without writing in it,
+  `homes rm` unregisters one, `homes path <name>` prints its path for launchers. Without
+  `CHARTROOM_HOME`, a command run in a registered home's directory (or below it) resolves that
+  home, before the config file; the crew views do the same, and the Claude Code one names the
+  home to every `chartroom` run. `CHARTROOM_DASHBOARD_PORT` sets the dashboard's port (`--port`
+  still wins); the access cookie is now per port (`chartroom_dashboard_<port>`), so an exposed
+  dashboard asks for its token link once after updating; the page's title and header and the
+  lanes JSON (`home_name`) name the home. `sweep` leaves another registered home's work alone:
+  its workers in a shared project's `.worktrees/`, its orphaned loops and its listeners are
+  neither freed nor listed. `status`, `board`, `todo` and the new `inbox list [--json]` take
+  `--all-homes`: the command, read-only, in every registered home with that home's own
+  settings, one `== <home> · <path>` section each (`--json`: an array of `{home, path,
+  current, result}`). `doctor` shows the home's name, its own config, the workspace and the
+  dashboard port. The chartroom skill checks at session start that `doctor` names the
+  directory it started in, keeps work in its own home and only reads the others; bearings reads
+  every home when asked to or when the home oversees the others; join finds a home by its
+  registered name.
 - Focus mode: one project, or a few, at a time, with a held count so it is never left on by
   accident. `chartroom focus <project>[,<project>...] [--for 30m|4h|1d]` writes `focus.json` in
   the home and says what it covers; `chartroom focus [--json]` shows it; `chartroom focus off`

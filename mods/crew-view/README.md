@@ -166,9 +166,11 @@ event), and then only if all of these hold:
 2. `CHARTROOM_TASK` is unset;
 3. the working directory has no `worktrees` path segment;
 4. the working directory is the chartroom home, resolved as the CLI resolves it:
-   `$CHARTROOM_HOME`, `$CAP_HOME`, `CHARTROOM_HOME=` in the config file
-   (`$CHARTROOM_CONFIG` or `${XDG_CONFIG_HOME:-~/.config}/chartroom/config`), then `~/.chartroom`
-   (or a pre-existing `~/.captain`).
+   `$CHARTROOM_HOME`, `$CAP_HOME`, the registered home the working directory is (the `homes`
+   file next to the config file, with several homes on one machine), `CHARTROOM_HOME=` in the
+   config file (`$CHARTROOM_CONFIG` or `${XDG_CONFIG_HOME:-~/.config}/chartroom/config`), then
+   `~/.chartroom` (or a pre-existing `~/.captain`). Every `chartroom` run of the mod's then names
+   that home (`CHARTROOM_HOME`), so the band shows this session's home.
 
 The check reads environment variables and files only; it never runs a process. Once awake the
 mod stays awake for the session (kept in `$.state`, so a hot reload keeps it). If a resumed session

@@ -543,6 +543,68 @@ chartroom todo add --project shop "renew the cert by 2026-10-22"   # your own it
   [crew views](#a-live-crew-view-in-claude-code-and-pi) draw it under their band with no second
   poll, and the dashboard shows a "Your next steps" strip above the lanes.
 
+## Several XOs on one machine
+
+One home is one XO with one crew. When your work splits cleanly, say one home per company or
+client, give each its own home: its own projects, preferences and rulings, inbox, tasks and
+crew, dashboard and agent memory, and its own XO session. Nothing of one home's leaks into
+another's digest, and a question is never answered in the wrong company's terms.
+
+```bash
+CHARTROOM_HOME=~/chartroom/acme   chartroom init --name acme     # workspace acme-crew, dashboard port 4518
+CHARTROOM_HOME=~/chartroom/globex chartroom init --name globex   # workspace globex-crew, dashboard port 4519
+chartroom homes                                                   # the list, and anything that would collide
+```
+
+`init --name` writes the home's own settings to `<home>/config` (the same `KEY=VALUE` format as
+`~/.config/chartroom/config`, and it wins over it), only for keys it does not set yet: a
+workspace of its own (`CHARTROOM_WORKSPACE`), so its workers' tabs never mix with another
+home's, and a dashboard port of its own (`CHARTROOM_DASHBOARD_PORT`, the next free one from
+4518). Add anything else that should differ, such as `CHARTROOM_PROJECT_ROOTS` narrowed to that
+client's repositories, so `chartroom project` only finds theirs. It also adds the home to
+`~/.config/chartroom/homes`, one `name=path` line each. `chartroom homes add <name> <path>`
+registers an existing home without writing anything in it, and `homes rm` unregisters one
+without touching it.
+
+**Starting an XO.** Start the agent in the home's directory, as for any home. In a registered
+home that is enough: chartroom resolves the home from the directory it runs in (after
+`CHARTROOM_HOME`, before the config file), and so does the crew view. A one-word launcher in
+your shell rc keeps it short, and keeps your own alias for the agent:
+
+```zsh
+# xo <home>: an XO session in that home; `xo` alone lists the homes.
+xo() {
+  [[ -n "$1" ]] || { chartroom homes; return; }
+  local h; h="$(chartroom homes path "$1")" || return
+  (cd "$h" && CHARTROOM_HOME="$h" claude "${@:2}")
+}
+```
+
+The chartroom skill starts by checking that `chartroom doctor` names the directory it started
+in, and stops if it does not, so a session never drives another home by mistake.
+
+**What each home keeps to itself, and what they share.**
+
+| Per home | Shared by every home on the machine |
+|---|---|
+| `tasks/`, `worktrees/`, `inbox.md`, `commander.md`, `rulings.log`, `projects.md`, `focus.json` | the install, the skills and the crew view |
+| the workspace its workers' tabs open in | `~/.config/chartroom/config` (harness, branch prefix, backend order), under each home's own `config` |
+| the dashboard (`.dashboard.*`, its port, its page title) and its access cookie | the list of homes |
+| the `watch` cursor and wake stream | herdr agent names (task ids, unique per machine) |
+| what `sweep` frees: another registered home's workers, loops and listeners are neither freed nor listed | a project two homes both work in (its `.worktrees/` holds both homes' worktrees, by task id) |
+
+**Reading across homes.** `status`, `board`, `todo` and `inbox list` take `--all-homes`: the
+same command, read-only, run in every registered home with that home's own settings, one
+`== <home> · <path>` section each (`--json`: an array of `{home, path, current, result}`). A home
+that oversees the others, for errands that belong to no project, uses it for its bearings. It
+reads; it never steers, closes or dispatches another home's work. That belongs to the home's
+own XO.
+
+**Splitting an existing home.** Make the new homes, copy each one its lines from `projects.md`
+and its live lines from `rulings.log` (verbatim: the ids stay the same, and `chartroom rule
+render` rebuilds `commander.md`'s block), and leave the old home's tasks to finish where they
+are. Nothing has to move.
+
 ## Housekeeping: sweep
 
 Finished work leaves things running: the agent sessions of done tasks, a `chartroom watch` whose
@@ -723,12 +785,15 @@ CLI flags may change before 1.0.
 
 ## Configuration
 
-Environment variables win. Otherwise chartroom reads `~/.config/chartroom/config`
-(`KEY=VALUE`, no shell evaluation; `CHARTROOM_CONFIG` overrides the path).
+Environment variables win. Then the home's own `config`, if it has one (several homes on one
+machine), then `~/.config/chartroom/config` (`KEY=VALUE`, no shell evaluation;
+`CHARTROOM_CONFIG` overrides the path). The home's `config` can set every key but
+`CHARTROOM_HOME` and `CHARTROOM_PLATFORM`. The homes on the machine are listed in `homes`, next
+to the config file.
 
 | Key | Default | |
 |---|---|---|
-| `CHARTROOM_HOME` | `~/.chartroom` | legacy: `CAP_HOME`, then an existing `~/.captain` |
+| `CHARTROOM_HOME` | `~/.chartroom` | legacy: `CAP_HOME`; then the registered home the current directory is (or lies in); then an existing `~/.captain` |
 | `CHARTROOM_PROJECT_ROOTS` | *(empty)* | colon-separated dirs searched by `chartroom project <name>` |
 | `CHARTROOM_WORKSPACE` | `chartroom-crew` | herdr workspace / cmux workspace / tmux session name |
 | `CHARTROOM_BACKEND_ORDER` | see above | space- or comma-separated |
@@ -741,6 +806,7 @@ Environment variables win. Otherwise chartroom reads `~/.config/chartroom/config
 | `CHARTROOM_CLAUDE_HEADLESS_PERMISSION` | `acceptEdits` | |
 | `CHARTROOM_CLAUDE_ALLOWED_TOOLS` | `Bash Read Edit Write Glob Grep WebFetch WebSearch` | headless Claude |
 | `CHARTROOM_WATCH_INTERVAL` | `3` | seconds |
+| `CHARTROOM_DASHBOARD_PORT` | `4517` | the port `dashboard` and `dashboard open` use (`--port` overrides); each home on a machine needs its own |
 | `CHARTROOM_DASHBOARD_RECENT_HOURS` | `48` | how far back the dashboard's Recently finished lane reaches |
 | `CHARTROOM_DASHBOARD_THEME` | `chartroom` | the dashboard's default theme: `chartroom` or `hud` (`--theme` overrides) |
 | `CHARTROOM_DASHBOARD_HOST` | `127.0.0.1` | the IPv4 address the dashboard binds; `0.0.0.0` is every interface (`--host` / `--expose` override). Beyond loopback it needs the access token |

@@ -50,7 +50,13 @@ Before your first dispatch in a session, read:
 
 Run this once at the start of every session, before taking new work:
 
-1. `chartroom init` (idempotent), then read `commander.md` in the home (standing preferences;
+1. `chartroom doctor`: its `home:` line is this session's home, which `$CHARTROOM_HOME` means
+   below. If it is not the directory this session started in (symlinks aside), stop before
+   anything else and tell the commander which home chartroom would drive instead: with several
+   homes on one machine, this session would otherwise act as another home's XO. Starting it
+   with `CHARTROOM_HOME=<this directory>`, or registering this home
+   (`chartroom homes add <name>`), fixes it.
+   Then `chartroom init` (idempotent), and read `commander.md` in the home (standing preferences;
    older homes call it `captain.md`; its generated "Rulings" block is the live set from
    `rulings.log`, and it wins over older hand-written text), `projects.md`, and `inbox.md`
    (open questions and chat approvals).
@@ -298,6 +304,27 @@ While a focus is on (`status` and `board` lead with `🎯 focus: ...`; `chartroo
   and lists what was held. Give the count in a line, then a `bearings` digest that walks those
   items first. A `--for` focus ends by itself: once `chartroom focus` says it `ran out`, tell
   the commander in one line, then offer bearings.
+
+## Several homes
+
+One machine can hold several homes, usually one per company or client, each with its own XO
+session, projects, preferences, inbox and crew. `chartroom homes` lists them. This session is
+the XO of its own home only.
+
+- **Work stays in its home.** Dispatch only projects this home covers: its `projects.md`, and
+  what `chartroom project` finds under its project roots. If the commander asks for work in a
+  project another home covers, say which home it belongs to and don't dispatch it here, unless
+  they tell you to keep it here.
+- **Reading the others.** `chartroom status --all-homes`, `chartroom inbox list --all-homes`,
+  `chartroom todo --all-homes` and `chartroom board --all-homes` read every home, read-only,
+  one section per home (`--json`: one `{home, path, result}` per home). Use them when the
+  commander asks across homes ("everything", "every company"), and for bearings when this
+  home's preferences say it oversees the others. To look closer at one item, read that home's
+  records: `CHARTROOM_HOME=<its path> chartroom show <id>`, its `tasks/<id>/report.md`.
+- **Never act in another home.** Its tasks belong to its own XO: never steer, stop, close,
+  dispatch or sweep them from here, and never write in its files. A decision from another home
+  is answered in that home's XO session; tell the commander so, with the question.
+- **Label what comes from another home** with it: `**[<home> · <project>]**`.
 
 ## Steering the tools themselves
 
