@@ -112,7 +112,7 @@ dashboard_json() { # [pr-states-file]
   printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s \
     --argjson inbox "$(dashboard_inbox)" --argjson prs "$prs" --argjson hours "$hours" \
     --argjson artifacts "$arts" --argjson artifact_counts "$(jq -c "$ARTIFACT_COUNTS_JQ" <<<"$arts")" \
-    --arg home "$CR_HOME" --arg version "$CR_VERSION" --argjson focus "$(focus_json)" \
+    --arg home "$CR_HOME" --arg home_name "$(home_name_of "$CR_HOME")" --arg version "$CR_VERSION" --argjson focus "$(focus_json)" \
     -f "$CR_ROOT/lib/dashboard/lanes.jq" |
     todo_attach "$arts" # .todo, the commander's next steps (lib/todo.sh)
 }
@@ -123,7 +123,8 @@ dashboard_doctor_json() {
   local pid p h=""
   read -r pid p h < <(dashboard_running) || true
   jq -cn --arg b "$(cfg DASHBOARD_HOST '' 127.0.0.1)" --arg t "$([[ -s "$(dashboard_tokenfile)" ]] && echo 1)" \
-    --arg r "${h:+$h:$p}" '{bind: $b, token_set: ($t == "1"), running: (if $r == "" then null else $r end)}'
+    --arg port "$(cfg DASHBOARD_PORT '' "$CR_DASHBOARD_PORT_DEFAULT")" \
+    --arg r "${h:+$h:$p}" '{port: ($port | tonumber? // $port), bind: $b, token_set: ($t == "1"), running: (if $r == "" then null else $r end)}'
 }
 
 dashboard_running() { # -> prints "pid port host" when a dashboard for this home is up
@@ -224,9 +225,11 @@ open_url_powershell() { powershell.exe -NoProfile -NonInteractive -Command "Star
 open_url_start() { cmd //c start "" "$1"; }
 
 cmd_dashboard() {
-  local port="$CR_DASHBOARD_PORT_DEFAULT" open=0 daemon=0 json=0 prs_file="" gh=1 theme host token=1
+  local port open=0 daemon=0 json=0 prs_file="" gh=1 theme host token=1
   theme="$(cfg DASHBOARD_THEME '' chartroom)"
   host="$(cfg DASHBOARD_HOST '' 127.0.0.1)"
+  # Each home on a machine needs its own port (its config's CHARTROOM_DASHBOARD_PORT).
+  port="$(cfg DASHBOARD_PORT '' "$CR_DASHBOARD_PORT_DEFAULT")"
   case "${1:-}" in
     open) shift; dashboard_open "$@"; return ;;
     stop) dashboard_stop; return ;;
@@ -259,7 +262,7 @@ cmd_dashboard() {
      (( 10#${BASH_REMATCH[1]} > 255 || 10#${BASH_REMATCH[2]} > 255 || 10#${BASH_REMATCH[3]} > 255 || 10#${BASH_REMATCH[4]} > 255 )); then
     die "--host must be an IPv4 address (0.0.0.0 for every interface; set with --host, --expose or CHARTROOM_DASHBOARD_HOST), not '$host'"
   fi
-  [[ "$port" =~ ^[0-9]+$ ]] && (( port <= 65535 )) || die "--port must be 0-65535 (0 picks a free port)"
+  [[ "$port" =~ ^[0-9]+$ ]] && (( port <= 65535 )) || die "--port must be 0-65535 (0 picks a free port; set with --port or CHARTROOM_DASHBOARD_PORT)"
   [[ " $CR_DASHBOARD_THEMES " == *" $theme "* ]] || die "unknown dashboard theme '$theme' (themes: $CR_DASHBOARD_THEMES; set with --theme or CHARTROOM_DASHBOARD_THEME)"
   find_python
   [[ ${#CR_PY[@]} -gt 0 ]] || die "$(python_missing)"

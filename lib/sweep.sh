@@ -207,6 +207,23 @@ sweep_tasks_json() {
     'map(. + {herdr: (if .runner == "herdr" then ($herdr[.id] // null) else null end), close: ($close[.id] // null)})' <<<"$base"
 }
 
+# Every other registered home (lib/homes.sh): its directories (as given and physically), its
+# task ids and the worktrees they record, as {homes, ids, wts}. Their work is theirs to sweep:
+# this home's sweep neither acts on it nor asks about it.
+sweep_others_json() {
+  local here name p metas out='{"homes":[],"ids":[],"wts":[]}' tasks
+  here="$(phys_dir "$CR_HOME")"
+  shopt -s nullglob
+  while IFS=$'\t' read -r name p; do
+    [[ -d "$p" && "$(phys_dir "$p")" != "$here" ]] || continue
+    metas=("$p"/tasks/*/meta.json); tasks='[]'
+    [[ ${#metas[@]} -gt 0 ]] && tasks="$(jq -s -c 'map({id, wt: ((.worktree // "") | rtrimstr("/"))})' "${metas[@]}")"
+    out="$(jq -c --argjson forms "$(sweep_forms "$p" | jq -R -s -c 'split("\n") | map(select(length > 0))')" --argjson t "$tasks" \
+      '.homes += $forms | .ids += [$t[].id] | .wts += [$t[].wt | select(. != "")]' <<<"$out")"
+  done < <(homes_entries)
+  printf '%s\n' "$out"
+}
+
 # herdr's panes as [{pane, tab, cwd, agent}] (one call; [] without herdr or on an older one).
 sweep_herdr_panes() {
   local r=""
@@ -224,7 +241,7 @@ sweep_plan() { # [close-failed-json]
   jq -n -c --argjson procs "$procs" --argjson tasks "$tasks" --argjson panes "$(sweep_herdr_panes)" \
     --argjson homes "$(sweep_forms "$CR_HOME" | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
     --argjson self "$$" --argjson idle "$((CR_SWEEP_IDLE_HOURS * 3600))" \
-    --argjson failed "${1:-[]}" --arg dash "$dash" \
+    --argjson failed "${1:-[]}" --arg dash "$dash" --argjson others "$(sweep_others_json)" \
     -f "$CR_ROOT/lib/sweep.jq"
 }
 

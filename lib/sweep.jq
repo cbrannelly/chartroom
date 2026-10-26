@@ -10,6 +10,8 @@
 #   $idle    seconds a finished-but-open task must be idle before its leftovers are raised
 #   $failed  task ids whose close failed in this run: nothing of theirs is safe
 #   $dash    the pid of the dashboard .dashboard.pid tracks ("" when none runs)
+#   $others  the other registered homes: {homes: their dirs, ids: their task ids, wts: the
+#            worktrees their tasks record}
 #
 # Output: {items, summary}. Each item: {class, action, reason, task, what, pids, procs, age_s,
 # cpu_s, pcpu, rss_kb}; class session | close | orphan | daemon; action apply (the safe set) |
@@ -33,6 +35,8 @@
 #            chartroom worktree dir no task of this home records -> human; in a done/failed/stopped-silent task's worktree, running
 #            >= $idle with the task idle >= $idle -> human. A process with a terminal is
 #            never apply (someone may be using it): human instead.
+#   other homes  a loop run from another registered home, a listener for its task, a process in
+#            a worktree its task records: kept, never listed (that home's sweep sees to it).
 
 def base: split("/") | last;
 def words: split(" ") | map(select(length > 0));
@@ -209,12 +213,14 @@ def wrapper: (.args | words) as $w | (($w[0] // "") | base) as $b
     | (any($homes[]; . as $h | $p.cwd | under($h))) as $here
     | if $l.kind == "watch" then
         (if $o and $here then . + {action: "apply", reason: "its session is gone (parent \(if $p.ppid <= 1 then "pid 1" else "init" end)), running \($p.age | dur)"}
+         elif $o and any($others.homes[]; . as $h | $p.cwd | under($h)) then . + {action: "keep"}
          elif $o then . + {action: "human", reason: "orphaned (its session is gone), but run from \($p.cwd // "an unknown directory"), not this home"}
          else empty end)
       elif $l.kind == "listen" then
         ($T[$l.arg // ""] // null) as $t
         | (if $t != null and $o then . + {task: $t.id, action: "apply", reason: "its session is gone (parent pid 1 or init)"}
            elif $t != null and $t.state == "closed" then . + {task: $t.id, action: "apply", reason: "its task is closed"}
+           elif $t == null and IN($l.arg // ""; $others.ids[]) then . + {action: "keep"}
            elif $t == null and $o then . + {action: "human", reason: "orphaned listener for a task this home does not have"}
            else empty end)
       else
@@ -231,7 +237,8 @@ def wrapper: (.args | words) as $w | (($w[0] // "") | base) as $b
      | trees(.) as $tree | group_item($tree)
      + {class: "daemon", task: $g.task, state: ($t.state // null), project: ($t.project // null), worktree: ($t.wt // $g.root)}
      | (any($homes[]; . as $h | $g.root | startswith($h + "/worktrees/"))) as $ours
-     | . + (if $t == null then
+     | . + (if $t == null and any($others.wts[]; . as $w | $g.root | under($w)) then {action: "keep"}
+            elif $t == null then
               (if $g.root_gone and $ours then {action: "apply", reason: "its worktree \($g.root) no longer exists"}
                elif $g.root_gone then {action: "human", reason: "runs in \($g.root), which no longer exists and no task of this home records (another home's?)"}
                else {action: "human", reason: "runs in a chartroom worktree no task records (\($g.root))"} end)

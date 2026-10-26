@@ -25,7 +25,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
 import type { CrewBoard, CrewDetail, CrewView, TodoItem, TodoList } from '../types'
-import { bandSegments, configPath, detailActions, detailLines, isUnderWorktrees, paneLines, parseBoard, parseDetail, resolveHome, samePath } from './crew'
+import { bandSegments, configPath, detailActions, detailLines, homesPath, isUnderWorktrees, paneLines, parseBoard, parseDetail, resolveHome, samePath } from './crew'
 import type { ActionId, Tone } from './crew'
 import { doneRefusal, parseTodo, shownItems, todoActions, todoBandLines, todoKey, todoPaneLines } from './todo'
 import type { TodoActionId } from './todo'
@@ -74,10 +74,13 @@ async function detectXo($: EngineInterface, cwd: string, isInteractive: boolean)
     xdgConfigHome: await $.env.get('XDG_CONFIG_HOME'),
     home,
   })
+  const homes = homesPath(cfg)
   const chartroomHome = resolveHome({
     chartroomHome: await $.env.get('CHARTROOM_HOME'),
     capHome: await $.env.get('CAP_HOME'),
     configText: (await $.fs.exists(cfg)) ? await $.fs.read(cfg) : undefined,
+    homesText: (await $.fs.exists(homes)) ? await $.fs.read(homes) : undefined,
+    cwd,
     home,
     hasChartroomDir: await $.fs.exists(`${home}/.chartroom`),
     hasCaptainDir: await $.fs.exists(`${home}/.captain`),
@@ -88,12 +91,14 @@ async function detectXo($: EngineInterface, cwd: string, isInteractive: boolean)
   return a && b && samePath(a, b) ? chartroomHome : null
 }
 
-/** One `chartroom <args>` run: `chartroom` on PATH, then ~/.local/bin (a thin GUI PATH). */
+/** One `chartroom <args>` run: `chartroom` on PATH, then ~/.local/bin (a thin GUI PATH). It
+ * names the XO's home outright, so a session that found its home by its directory (a registered
+ * home, no CHARTROOM_HOME) reads that home whatever the CLI would resolve. */
 async function runChartroom($: EngineInterface, args: string[]): Promise<{ stdout: string } | { error: string }> {
-  const home = (await $.env.get('HOME')) ?? ''
-  for (const bin of ['chartroom', `${home}/.local/bin/chartroom`]) {
+  const userHome = (await $.env.get('HOME')) ?? ''
+  for (const bin of ['chartroom', `${userHome}/.local/bin/chartroom`]) {
     try {
-      const ran = await $.process.run([bin, ...args], { timeoutMs: 20_000 })
+      const ran = await $.process.run([bin, ...args], { timeoutMs: 20_000, ...(home ? { env: { CHARTROOM_HOME: home } } : {}) })
       if (ran.exitCode === 0) return { stdout: ran.stdout }
       if (ran.exitCode === 127) continue
       const why = (ran.stderr.trim().split('\n')[0] ?? '').replace(/^chartroom:\s*/, '')

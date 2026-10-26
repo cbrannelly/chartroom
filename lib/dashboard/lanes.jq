@@ -6,6 +6,7 @@
 #   $artifacts        the open artifacts (artifacts_json --open); each card carries its own
 #   $artifact_counts  {open, message, runbook, note}
 #   $home, $version
+#   $home_name  the home's name in the list of homes (lib/homes.sh), "" when it has none
 #   $focus    focus mode's {projects, since, until}, or null (lib/focus.sh)
 #
 # Rules (README "Dashboard" documents the same table):
@@ -76,6 +77,7 @@ now as $now
   {
     generated_at: ($now | todate),
     home: $home,
+    home_name: (if $home_name == "" then null else $home_name end),
     version: $version,
     recent_hours: $hours,
     lanes: {

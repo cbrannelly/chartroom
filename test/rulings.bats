@@ -209,3 +209,16 @@ EOF
   grep -q "topic=two supersedes=$first " "$CHARTROOM_HOME/rulings.log"
   [ "$(cr rule list --json | jq -r '.[].topic')" = two ]
 }
+
+@test "a ruling copied from another home keeps working when the one it superseded stays behind" {
+  # (homes split one ledger by copying each home's live lines verbatim)
+  printf '2026-01-02T00:00:00Z [r-b2b2] topic=merge-bar supersedes=r-a1a1 src=chat :: copied: bot approval only\n' >"$CHARTROOM_HOME/rulings.log"
+  run cr rule render
+  [ "$status" -eq 0 ]
+  block | grep -qF -- "- copied: bot approval only (merge-bar; r-b2b2, 2026-01-02)"
+  run cr rule list --all
+  [ "$status" -eq 0 ]; [[ "$output" == *"r-b2b2"* ]]
+  run cr rule add --topic merge-bar "copied, then replaced here"
+  [ "$status" -eq 0 ]
+  [ "$(cr rule list --json | jq -r '[.[] | select(.topic == "merge-bar") | .text] | join("|")')" = "copied, then replaced here" ]
+}

@@ -298,3 +298,37 @@ closed_record() { # <id> [extra-json]
   [[ "$output" == *"Sessions of finished tasks"* ]]
   [ "$(cr sweep --idle-hours 0 --json | jq '[.items[] | select(.action == "human")] | length')" -eq 14 ]
 }
+
+@test "sweep leaves another registered home's work alone: its workers, loops and listeners are neither freed nor listed" {
+  # two homes working in one project, both with project-layout worktrees (.worktrees/)
+  echo ".worktrees/" >"$PROJECT/.gitignore"
+  other="$BATS_TEST_TMPDIR/other"
+  CHARTROOM_HOME="$other" cr init --name other >/dev/null
+  cr homes add here >/dev/null
+  closed_record mine-1
+  wt="$PROJECT/.worktrees/chartroom_theirs-1a2b"; mkdir -p "$wt" "$other/tasks/theirs-1a2b"
+  jq -n --arg p "$PROJECT" --arg wt "$(cd "$wt" && pwd -P)" '{schema: 1, id: "theirs-1a2b", title: "theirs", kind: "scout",
+    backend: "command", project: $p, base: "main", worktree: $wt}' >"$other/tasks/theirs-1a2b/meta.json"
+  : >"$other/tasks/theirs-1a2b/events.log"
+  worker="$(spawn "$wt" bash "$TOOLS/vite")"
+  loop="$(spawn_orphan "$other" bash "$TOOLS/bin/chartroom" watch)"
+  ear="$(spawn_orphan "$BATS_TEST_TMPDIR" bash "$TOOLS/bin/chartroom" listen theirs-1a2b)"
+  # an unknown one still needs a human, as before
+  stray="$(spawn "$PROJECT/.worktrees" bash -c 'mkdir -p chartroom_nobody && cd chartroom_nobody && exec bash "$1"' _ "$TOOLS/vite")"
+  json="$(sweep_json --idle-hours 0)"
+  [ -z "$(item_for "$json" "$worker")" ]
+  [ -z "$(item_for "$json" "$loop")" ]
+  [ -z "$(item_for "$json" "$ear")" ]
+  [ "$(item_for "$json" "$stray" | jq -r .action)" = human ]
+  cr sweep --apply --idle-hours 0 >/dev/null
+  alive "$worker"; alive "$loop"; alive "$ear"; alive "$stray"
+  # without the list of homes, each is what it was before: one for a human
+  rm "$BATS_TEST_TMPDIR/homes"
+  json="$(sweep_json)"
+  [ "$(item_for "$json" "$worker" | jq -r '.action + ": " + .reason')" = "human: runs in a chartroom worktree no task records ($(cd "$wt" && pwd -P))" ]
+  pp="$(ps -o ppid= -p "$loop" | tr -d ' ')"
+  if [[ "$pp" == 1 ]] || ps -o args= -p "$pp" | grep -qE '(^|/)(launchd|init|systemd)( |$)'; then
+    [ "$(item_for "$json" "$loop" | jq -r .action)" = human ]
+    [ "$(item_for "$json" "$ear" | jq -r '.action + ": " + .reason')" = "human: orphaned listener for a task this home does not have" ]
+  fi
+}

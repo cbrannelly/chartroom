@@ -211,6 +211,9 @@ def make_handler(board, port, page, host, use_token, home):
     # own origin never saw the token), so any name for this machine works; without one, only
     # its addresses and its host name do.
     allowed_hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
+    # Cookies are per host, not per port: one name per port keeps two homes' dashboards on one
+    # machine from overwriting each other's token.
+    cookie = "%s_%d" % (TOKEN_COOKIE, port)
     if not is_loopback(host):
         names = ([host] if host != "0.0.0.0" else interface_addrs()) + [socket.gethostname()]
         names += [n + ".local" for n in names[-1:] if not n.endswith(".local")]
@@ -254,7 +257,7 @@ def make_handler(board, port, page, host, use_token, home):
                     self.send_response(303)
                     self.send_header("Location", path + ("?" + rest if rest else ""))
                     self.send_header("Set-Cookie", "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax"
-                                     % (TOKEN_COOKIE, token, TOKEN_MAX_AGE))
+                                     % (cookie, token, TOKEN_MAX_AGE))
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Referrer-Policy", "no-referrer")
                     self.send_header("Content-Length", "0")
@@ -263,7 +266,7 @@ def make_handler(board, port, page, host, use_token, home):
             else:
                 for part in (self.headers.get("Cookie") or "").split(";"):
                     k, _, v = part.strip().partition("=")
-                    if k == TOKEN_COOKIE and token and hmac.compare_digest(v.encode(), token.encode()):
+                    if k == cookie and token and hmac.compare_digest(v.encode(), token.encode()):
                         return True
             msg = ("access token required: open the URL `chartroom dashboard` printed (it ends in ?token=...); "
                    "`chartroom dashboard status` on the host prints it again")

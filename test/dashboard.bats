@@ -353,14 +353,17 @@ start_exposed() {
   [ "$(code "$URL/api/dashboard")" = 401 ]
   [[ "$(get "$URL/api/dashboard" | jq -r .error)" == "access token required"* ]]
   [ "$(code "$URL/?token=wrong")" = 401 ]
-  [ "$(code -b "chartroom_dashboard=wrong" "$URL/")" = 401 ]
-  [ "$(code -b "chartroom_dashboard=" "$URL/")" = 401 ]
+  [ "$(code -b "chartroom_dashboard_$PORT=wrong" "$URL/")" = 401 ]
+  [ "$(code -b "chartroom_dashboard_$PORT=" "$URL/")" = 401 ]
+  # the cookie is per port: another home's dashboard on this machine keeps its own
+  [ "$(code -b "chartroom_dashboard=$t" "$URL/")" = 401 ]
+  [ "$(code -b "chartroom_dashboard_1$PORT=$t" "$URL/")" = 401 ]
   [ "$(code -X POST "$URL/api/dashboard")" = 405 ]
   # ?token= sets an HttpOnly cookie and redirects to the same URL without the token
   local h; h="$(curl -s -D - -o /dev/null "$URL/?token=$t&x=1" | tr -d '\r')"
   [[ "$h" == "HTTP/1."*" 303 "* ]]
   [[ "$h" == *$'\nLocation: /?x=1\n'* ]]
-  [[ "$h" == *"Set-Cookie: chartroom_dashboard=$t; Path=/; Max-Age="*"; HttpOnly; SameSite=Lax"* ]]
+  [[ "$h" == *"Set-Cookie: chartroom_dashboard_$PORT=$t; Path=/; Max-Age="*"; HttpOnly; SameSite=Lax"* ]]
   # a cookie jar does what a browser does
   local jar="$BATS_TEST_TMPDIR/jar"
   [ "$(code -L -c "$jar" -b "$jar" "$URL/?token=$t")" = 200 ]
@@ -368,7 +371,7 @@ start_exposed() {
   [ "$(get -b "$jar" "$URL/task/t-report/report.md")" = "# Report" ]
   [ "$(code -b "$jar" "$URL/task/t-report/meta.json")" = 404 ]
   # with the token, any Host works: the name another device uses for this machine
-  [ "$(code -b "chartroom_dashboard=$t" -H "Host: box.example.net:$PORT" "$URL/")" = 200 ]
+  [ "$(code -b "chartroom_dashboard_$PORT=$t" -H "Host: box.example.net:$PORT" "$URL/")" = 200 ]
   # status prints the URL again; stop takes it off the network
   run cr dashboard status
   [ "$status" -eq 0 ]; [[ "$output" == *"http://127.0.0.1:$PORT/?token=$t (pid $SRV_PID)"*"WARNING"* ]]
@@ -378,13 +381,13 @@ start_exposed() {
   # the token survives a restart (devices keep their cookie) and a rotated one applies at once
   start_exposed --expose
   [ "$(cat "$tf")" = "$t" ]
-  [ "$(code -b "chartroom_dashboard=$t" "$URL/")" = 200 ]
+  [ "$(code -b "chartroom_dashboard_$PORT=$t" "$URL/")" = 200 ]
   printf 'rotated-token-1234567890\n' >"$tf"
-  [ "$(code -b "chartroom_dashboard=$t" "$URL/")" = 401 ]
-  [ "$(code -b "chartroom_dashboard=rotated-token-1234567890" "$URL/")" = 200 ]
+  [ "$(code -b "chartroom_dashboard_$PORT=$t" "$URL/")" = 401 ]
+  [ "$(code -b "chartroom_dashboard_$PORT=rotated-token-1234567890" "$URL/")" = 200 ]
   # and a missing token file fails closed
   rm "$tf"
-  [ "$(code -b "chartroom_dashboard=rotated-token-1234567890" "$URL/")" = 401 ]
+  [ "$(code -b "chartroom_dashboard_$PORT=rotated-token-1234567890" "$URL/")" = 401 ]
 }
 
 @test "exposed: --no-token serves without a token but keeps the Host guard, and says so" {
@@ -402,17 +405,17 @@ start_exposed() {
   need_python
   echo "CHARTROOM_DASHBOARD_HOST=0.0.0.0" >"$CHARTROOM_CONFIG"
   run cr doctor --json
-  [ "$(jq -c .dashboard <<<"$output")" = '{"bind":"0.0.0.0","token_set":false,"running":null}' ]
+  [ "$(jq -c .dashboard <<<"$output")" = '{"port":4517,"bind":"0.0.0.0","token_set":false,"running":null}' ]
   start_exposed
   [ "$HOST_BOUND" = 0.0.0.0 ]
   [ "$(code "$URL/")" = 401 ]
   run cr doctor
-  [[ "$output" == *"dashboard: bind 0.0.0.0 (on the network), access token set, running on 0.0.0.0:$PORT"* ]]
+  [[ "$output" == *"dashboard: port 4517, bind 0.0.0.0 (on the network), access token set, running on 0.0.0.0:$PORT"* ]]
   cr dashboard stop >/dev/null
   start_daemon --no-gh --host 127.0.0.1
   [ "$(code "$URL/")" = 200 ]
   run cr doctor
-  [[ "$output" == *"dashboard: bind 0.0.0.0 (on the network), access token set, running on 127.0.0.1:$PORT"* ]]
+  [[ "$output" == *"dashboard: port 4517, bind 0.0.0.0 (on the network), access token set, running on 127.0.0.1:$PORT"* ]]
 }
 
 @test "exposed: dashboard open --expose opens the URL with the token" {
@@ -434,9 +437,9 @@ start_exposed() {
 @test "doctor: shows the dashboard's bind address and whether a token is set" {
   run cr doctor
   [ "$status" -eq 0 ]
-  [[ "$output" == *"dashboard: bind 127.0.0.1, access token not set, not running"* ]]
+  [[ "$output" == *"dashboard: port 4517, bind 127.0.0.1, access token not set, not running"* ]]
   run cr doctor --json
-  [ "$(jq -c .dashboard <<<"$output")" = '{"bind":"127.0.0.1","token_set":false,"running":null}' ]
+  [ "$(jq -c .dashboard <<<"$output")" = '{"port":4517,"bind":"127.0.0.1","token_set":false,"running":null}' ]
 }
 
 @test "server: --port picks the port; bad and busy ports fail clearly" {
@@ -734,4 +737,39 @@ EOF2
   [[ "$page" == *'class: "att"'* && "$page" == *'id="viewer-copy"'* ]]
   grep -q 'copy first, while this is still the click' "$REPO_ROOT/lib/dashboard/index.html"
   [ -z "$(grep -Ei '(src|href)=["'"'"']?(https?:)?//|@import|url\(https?:' <<<"$page" || true)" ]
+}
+
+@test "dashboard: each home's own port comes from its config, so two homes' dashboards run side by side" {
+  need_python
+  export CHARTROOM_OPENER=true
+  local ports p1 p2 other="$BATS_TEST_TMPDIR/other"
+  ports="$("$PY" -c 'import socket
+s = [socket.socket() for _ in range(2)]
+for x in s: x.bind(("127.0.0.1", 0))
+print(*[x.getsockname()[1] for x in s])
+for x in s: x.close()')"
+  read -r p1 p2 <<<"$ports"
+  CHARTROOM_HOME="$other" cr init >/dev/null
+  echo "CHARTROOM_DASHBOARD_PORT=$p1" >"$CHARTROOM_HOME/config"
+  echo "CHARTROOM_DASHBOARD_PORT=$p2" >"$other/config"
+  [ "$(cr doctor --json | jq -r .dashboard.port)" = "$p1" ]
+  run cr dashboard open --no-gh
+  [ "$status" -eq 0 ]; [[ "$output" == *"dashboard open: http://127.0.0.1:$p1/"* ]]
+  run env CHARTROOM_HOME="$other" "$CHARTROOM" dashboard open --no-gh
+  [ "$status" -eq 0 ]; [[ "$output" == *"dashboard open: http://127.0.0.1:$p2/"* ]]
+  [ "$(get "http://127.0.0.1:$p1/api/dashboard" | jq -r .home)" = "$CHARTROOM_HOME" ]
+  [ "$(get "http://127.0.0.1:$p2/api/dashboard" | jq -r .home)" = "$other" ]
+  # --port still wins over the config
+  cr dashboard stop >/dev/null
+  run cr dashboard --daemon --port 0 --no-gh
+  [ "$status" -eq 0 ]; read -r SRV_PID PORT <"$CHARTROOM_HOME/.dashboard.pid"
+  [ "$PORT" != "$p1" ]
+  run cr dashboard --port abc
+  [ "$status" -ne 0 ]; [[ "$output" == *"CHARTROOM_DASHBOARD_PORT"* ]]
+}
+
+@test "dashboard: the board names its home, from the list of homes" {
+  [ "$(cr dashboard --json | jq -r .home_name)" = null ]
+  cr homes add acme >/dev/null
+  [ "$(cr dashboard --json | jq -r .home_name)" = acme ]
 }

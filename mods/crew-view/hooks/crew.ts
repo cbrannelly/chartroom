@@ -9,6 +9,10 @@ export type HomeInputs = {
   capHome?: string
   /** The config file's text, when it exists. */
   configText?: string
+  /** The homes file's text (the homes on this machine), when it exists. */
+  homesText?: string
+  /** The session's working directory. */
+  cwd?: string
   home: string
   hasChartroomDir: boolean
   hasCaptainDir: boolean
@@ -17,6 +21,27 @@ export type HomeInputs = {
 /** Where the chartroom config file lives, as lib/core.sh's CR_CONFIG_FILE. */
 export function configPath(env: { chartroomConfig?: string; xdgConfigHome?: string; home: string }): string {
   return env.chartroomConfig || `${env.xdgConfigHome || `${env.home}/.config`}/chartroom/config`
+}
+
+/** The homes file, next to the config file, as lib/core.sh's CR_HOMES_FILE. */
+export function homesPath(configFile: string): string {
+  return `${configFile.replace(/\/[^/]*$/, '')}/homes`
+}
+
+/** The registered homes as lib/core.sh's homes_entries reads them: `name=path`, ~ expanded. */
+export function homeEntries(text: string, home: string): { name: string; path: string }[] {
+  const byName = new Map<string, string>()
+  for (const raw of text.split('\n')) {
+    const m = /^\s*([a-z][a-z0-9-]*)\s*=\s*(.*\S)\s*$/.exec(raw.replace(/\r$/, ''))
+    if (!m) continue
+    let p = m[2] ?? ''
+    const quoted = /^"(.*)"$/.exec(p) ?? /^'(.*)'$/.exec(p)
+    if (quoted) p = quoted[1] ?? ''
+    if (p === '~' || p.startsWith('~/')) p = home + p.slice(1)
+    p = p.replace(/\/+$/, '')
+    if (p) byName.set(m[1] ?? '', p)
+  }
+  return [...byName].map(([name, path]) => ({ name, path }))
 }
 
 /** A KEY=VALUE line's value as lib/core.sh's cfg_file_value reads it: last line wins. */
@@ -35,6 +60,14 @@ export function configValue(text: string, key: string): string {
 export function resolveHome(i: HomeInputs): string {
   if (i.chartroomHome) return i.chartroomHome
   if (i.capHome) return i.capHome
+  // The registered home the working directory is, or lies inside (the nearest).
+  if (i.cwd && i.homesText !== undefined) {
+    const cwd = i.cwd.length > 1 ? i.cwd.replace(/\/+$/, '') : i.cwd
+    const hit = homeEntries(i.homesText, i.home)
+      .filter((h) => cwd === h.path || cwd.startsWith(`${h.path}/`))
+      .sort((a, b) => b.path.length - a.path.length)[0]
+    if (hit) return hit.path
+  }
   const fromConfig = i.configText === undefined ? '' : configValue(i.configText, 'CHARTROOM_HOME')
   if (fromConfig) return fromConfig.replace(/^~/, i.home)
   if (i.hasChartroomDir || !i.hasCaptainDir) return `${i.home}/.chartroom`

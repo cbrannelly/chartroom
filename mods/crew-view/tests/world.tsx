@@ -125,6 +125,8 @@ export const XO_WORLD = (): World => ({
  */
 export function install(on: On, world: World) {
   const runs: string[][] = []
+  // The CHARTROOM_HOME each run named (undefined: none), in step with runs.
+  const homes: (string | undefined)[] = []
   const commands: string[] = []
   const copies: string[] = []
   const fills: string[] = []
@@ -153,6 +155,7 @@ export function install(on: On, world: World) {
   })
   on('process.run', ($, e) => {
     runs.push([...e.argv])
+    homes.push(e.init?.env?.CHARTROOM_HOME)
     const out = world.board()
     if (out === 'missing' || e.argv[0] !== 'chartroom') return { deny: `spawn ${e.argv[0]} ENOENT` }
     const reply = e.argv[1] === 'show' ? world.show(e.argv[2] ?? '') : e.argv[1] === 'artifact' ? world.artifact(e.argv[3] ?? '') : e.argv[1] === 'todo' ? world.todo(e.argv.slice(2)) : out
@@ -176,7 +179,7 @@ export function install(on: On, world: World) {
   })
   // The engine's skill expansion: the prompt text as the skill computed it.
   on('skill.prompt', ($, e) => ({ text: e.text }))
-  return { runs, commands, copies, fills, clock }
+  return { runs, homes, commands, copies, fills, clock }
 }
 
 /** Starts a session in `cwd` and loads `skill` in it, as `/captain` or the Skill tool does. */

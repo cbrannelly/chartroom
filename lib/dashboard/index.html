@@ -959,7 +959,7 @@ function renderFocus(d) {
 
 function render(d) {
   document.getElementById("meta").textContent =
-    d.home + " · updated " + new Date(d.generated_at).toLocaleTimeString() +
+    (d.home_name ? d.home_name + " · " : "") + d.home + " · updated " + new Date(d.generated_at).toLocaleTimeString() +
     (d.pr_enrichment && d.pr_enrichment.enabled ? " · PR states via gh" : "");
   renderFocus(d);
   const max = Math.max(1, ...LANES.map(([k]) => focusCount(d, k)));
@@ -1058,7 +1058,7 @@ function render(d) {
   relock();
   firstRender = false;
   const needs = focusCount(d, "needs_you");
-  document.title = (needs ? "(" + needs + ") " : "") + "chartroom" + (d.focus ? " · 🎯 " + d.focus.held + " held" : "");
+  document.title = (needs ? "(" + needs + ") " : "") + "chartroom" + (d.home_name ? " · " + d.home_name : "") + (d.focus ? " · 🎯 " + d.focus.held + " held" : "");
 }
 
 // Your next steps: the board's .todo (lib/todo.jq), the items focus mode does not hold, the first

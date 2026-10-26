@@ -14,6 +14,7 @@
 #   tasks/<id>/artifacts/   drafts for the commander to send or run (lib/artifacts.sh)
 #   rulings.log             append-only commander rulings, latest wins per topic (lib/rulings.sh)
 #   focus.json              the project(s) in focus while focus mode is on (lib/focus.sh)
+#   config                  this home's own settings, over the config file (lib/core.sh)
 #
 # Usage: chartroom <command> [args]   (chartroom help for the list)
 
@@ -76,6 +77,8 @@ source "$CR_ROOT/lib/artifacts.sh"
 source "$CR_ROOT/lib/todo.sh"
 # shellcheck source=../lib/focus.sh
 source "$CR_ROOT/lib/focus.sh"
+# shellcheck source=../lib/homes.sh
+source "$CR_ROOT/lib/homes.sh"
 for _f in "$CR_ROOT"/lib/backends/*.sh; do
   # shellcheck source=/dev/null
   source "$_f"
@@ -153,6 +156,18 @@ select_backend() { # <id> -> sets SELECTED
 # ---------------------------------------------------------------- init / project
 
 cmd_init() {
+  local name="" ws="" port="" chk=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) [[ $# -ge 2 ]] || die "--name needs a value"; name="$2"; shift 2 ;;
+      --workspace) [[ $# -ge 2 ]] || die "--workspace needs a value"; ws="$2"; shift 2 ;;
+      --dashboard-port) [[ $# -ge 2 ]] || die "--dashboard-port needs a value"; port="$2"; shift 2 ;;
+      *) die "init: unknown arg $1 (usage: chartroom init [--name N] [--workspace W] [--dashboard-port P])" ;;
+    esac
+  done
+  [[ -z "$port" || ( "$port" =~ ^[0-9]+$ && "$port" -le 65535 ) ]] || die "--dashboard-port must be 0-65535"
+  # Check the name before anything is created, so a refused name leaves nothing behind.
+  [[ -n "$name" ]] && { chk="$(homes_check "$name" "$CR_HOME")" || exit 1; }
   mkdir -p "$CR_HOME/tasks" "$CR_HOME/worktrees"
   ensure_cursor
   local f t
@@ -164,6 +179,25 @@ cmd_init() {
     [[ -f "$f" ]] || cp "$CR_ROOT/templates/home-AGENTS.md" "$f"
   done
   echo "chartroom home ready: $CR_HOME ($CR_HOME_SOURCE)"
+  # Several homes on one machine: a named home gets its own workspace and dashboard port in its
+  # config (only the keys it does not set yet), and joins the list of homes.
+  if [[ -n "$name" ]]; then
+    [[ -n "$ws" ]] || ws="${CR_HOME_CFG[CHARTROOM_WORKSPACE]:-$name-crew}"
+    [[ -n "$port" ]] || port="${CR_HOME_CFG[CHARTROOM_DASHBOARD_PORT]:-}"
+    if [[ -z "$port" ]]; then port="$(home_next_port)"; fi
+  fi
+  if [[ -n "$ws$port" ]]; then
+    f="$CR_HOME/config"
+    [[ -s "$f" ]] || printf '# chartroom settings for this home (KEY=VALUE); they win over %s.\n' "$(home_tilde "$CR_CONFIG_FILE")" >>"$f"
+    [[ -n "$ws" && -z "${CR_HOME_CFG[CHARTROOM_WORKSPACE]:-}" ]] && printf 'CHARTROOM_WORKSPACE=%s\n' "$ws" >>"$f"
+    [[ -n "$port" && -z "${CR_HOME_CFG[CHARTROOM_DASHBOARD_PORT]:-}" ]] && printf 'CHARTROOM_DASHBOARD_PORT=%s\n' "$port" >>"$f"
+    load_home_config
+    echo "home config: $f (workspace $(cfg WORKSPACE CAP_CREW_WORKSPACE chartroom-crew), dashboard port $(cfg DASHBOARD_PORT '' "$CR_DASHBOARD_PORT_DEFAULT"))"
+  fi
+  if [[ -n "$name" ]]; then
+    if [[ "$chk" == same ]]; then echo "home $name: already registered"
+    else homes_register "$name" "$CR_HOME"; echo "registered home $name in $CR_HOMES_FILE"; fi
+  fi
   if [[ -z "$CR_PROJECT_ROOTS" ]]; then
     local c found=()
     for c in "$HOME/code" "$HOME/src" "$HOME/work" "$HOME/projects" "$HOME/dev"; do [[ -d "$c" ]] && found+=("$c"); done
@@ -799,7 +833,17 @@ cmd_inbox() {
         { print }' -v tag="$tag" -v out="$out"
       if [[ -s "$out" ]]; then cat "$out"; rm -f "$out"; else rm -f "$out"; die "no open inbox item $tag"; fi
       ;;
-    *) die "usage: chartroom inbox add [--project P] [--breaking] <text> | inbox project <i-xxxx> <project> | inbox tag" ;;
+    list) # list [--json]: the open items (Waiting on the commander, Approvals), read-only
+      local json=0 a
+      for a in "$@"; do case "$a" in --json) json=1 ;; *) die "inbox list: unknown arg $a" ;; esac; done
+      if [[ $json -eq 1 ]]; then dashboard_inbox; return; fi
+      dashboard_inbox | jq -r '
+        def line: "- " + (if .short_id then "[\(.short_id)] " else "" end) + (if .date then .date + " — " else "" end)
+          + (if .project then "[\(.project)] " else "" end) + .text + (if .held then "  (held)" else "" end);
+        if (.waiting | length) + (.approvals | length) == 0 then "inbox: nothing open"
+        else (if (.waiting | length) > 0 then "Waiting on the commander:", (.waiting[] | line) else empty end),
+             (if (.approvals | length) > 0 then "Approvals not yet in a brief:", (.approvals[] | line) else empty end) end' ;;
+    *) die "usage: chartroom inbox add [--project P] [--breaking] <text> | inbox list [--json] [--all-homes] | inbox project <i-xxxx> <project> | inbox tag" ;;
   esac
 }
 
@@ -1054,21 +1098,27 @@ cmd_doctor() {
   local notes=()
   [[ "$CR_PLATFORM" == posix ]] || mapfile -t notes < <(platform_notes)
   # A thin PATH is one chartroom had to fill in (path_hygiene): typical of GUI launchers.
-  local added="${CR_PATH_ADDED[*]:-}"
+  local added="${CR_PATH_ADDED[*]:-}" hname hcfg=""
+  hname="$(home_name_of "$CR_HOME")"
+  [[ -f "$CR_HOME_CONFIG" ]] && hcfg="$CR_HOME_CONFIG"
   if [[ $json -eq 1 ]]; then
     printf '%s\n' "${rows[@]}" | jq -s --arg v "$CR_VERSION" --arg h "$CR_HOME" --arg hs "$CR_HOME_SOURCE" --arg o "$CR_BACKEND_ORDER" --arg auto "$first_ok" --arg harness "$CR_HARNESS" \
       --arg bv "$BASH_VERSION" --arg bp "$BASH" --arg bf "$CR_BASH_FROM" --arg added "$added" \
-      --argjson dash "$(dashboard_doctor_json)" \
+      --argjson dash "$(dashboard_doctor_json)" --arg hname "$hname" --arg hcfg "$hcfg" --arg ws "$CR_WORKSPACE" \
       --arg platform "$CR_PLATFORM" --argjson notes "$(printf '%s\n' "${notes[@]+"${notes[@]}"}" | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
-      '{version:$v,home:$h,home_source:$hs,harness:$harness,
+      '{version:$v,home:$h,home_source:$hs,home_name:(if $hname=="" then null else $hname end),
+        home_config:(if $hcfg=="" then null else $hcfg end),workspace:$ws,harness:$harness,
         bash:{version:$bv,path:$bp,rerun_from:(if $bf=="" then null else $bf end)},
         path:{thin:($added!=""),added:($added|split(" ")|map(select(.!="")))},
         order:($o|split(" ")),auto:(if $auto=="" then null else $auto end),dashboard:$dash,backends:.}
        + (if $platform == "posix" then {} else {platform:$platform,notes:$notes} end)'
   else
     echo "chartroom $CR_VERSION"
-    echo "home:     $CR_HOME ($CR_HOME_SOURCE)"
+    [[ "$CR_HOME_SOURCE" == "registered home"* ]] && hname=""
+    echo "home:     $CR_HOME ($CR_HOME_SOURCE${hname:+; registered as $hname})"
     echo "config:   $CR_CONFIG_FILE$([[ -f "$CR_CONFIG_FILE" ]] || echo ' (not present)')"
+    [[ -n "$hcfg" ]] && echo "          $hcfg (this home's own; wins over the file above)"
+    echo "workspace: $CR_WORKSPACE"
     echo "harness:  $CR_HARNESS"
     echo "bash:     $BASH_VERSION at $BASH${CR_BASH_FROM:+ (re-run from $CR_BASH_FROM; the bash on PATH is older than 4)}"
     if [[ -n "$added" ]]; then
@@ -1083,7 +1133,7 @@ cmd_doctor() {
     esac
     echo "order:    $CR_BACKEND_ORDER"
     echo "auto:     ${first_ok:-none available}"
-    dashboard_doctor_json | jq -r '"dashboard: bind \(.bind)\(if .bind | startswith("127.") then "" else " (on the network)" end), access token \(if .token_set then "set" else "not set" end), \(if .running then "running on " + .running else "not running" end)"'
+    dashboard_doctor_json | jq -r '"dashboard: port \(.port), bind \(.bind)\(if .bind | startswith("127.") then "" else " (on the network)" end), access token \(if .token_set then "set" else "not set" end), \(if .running then "running on " + .running else "not running" end)"'
     echo
     printf '%s\n' "${rows[@]}" | jq -r '[.backend, (if .available then "ok" else "-" end), .steering, .reason] | @tsv' |
       { printf 'BACKEND\tOK\tSTEERING\tWHY NOT\n'; cat; } | table
@@ -1188,7 +1238,17 @@ cmd_help() {
 chartroom - run a crew of coding agents from one agent session (the XO)
 (state in $CHARTROOM_HOME, default ~/.chartroom)
 
-  chartroom init                          create the home (commander.md, projects.md, inbox.md, AGENTS.md)
+  chartroom init [--name N [--workspace W] [--dashboard-port P]]
+                                          create the home (commander.md, projects.md, inbox.md,
+                                          AGENTS.md). --name: one of several homes on this
+                                          machine: writes its own workspace (N-crew) and
+                                          dashboard port (the next free from 4518) to its
+                                          config, and adds it to the list of homes
+  chartroom homes [--json]                the homes on this machine: path, workspace, dashboard
+                                          port, open tasks; warns about a shared workspace or
+                                          port. homes add <name> [<path>] registers one (nothing
+                                          in it is written), homes rm <name> unregisters it,
+                                          homes path <name> prints its path (for launchers)
   chartroom doctor [--json]               what can run here: backends, why not, steering mode
   chartroom project <name|path>           resolve a repo: path, forge, default base, overrides
   chartroom new --project P --title T [--backend B] [--kind ship|scout] [--base REF] [--plan-gate]
@@ -1219,6 +1279,10 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           active security exposure, data loss) is never held by
                                           focus mode
   chartroom status [--json] [--all]       fleet view, derived from disk + live backends
+  chartroom status|board|todo|inbox list ... --all-homes
+                                          the same, read-only, in every home on this machine,
+                                          one "== <home>" section each (--json: an array of
+                                          {home, path, current, result})
   chartroom board [--json] [--no-color]   the dashboard's lanes in the terminal, one line per
                                           item: short id, [project], title, state, last event
   chartroom resolve <id> [--json]         a full or short id (as the dashboard shows it) -> the
@@ -1233,6 +1297,7 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           stable id, labelled [P] (a name, or a repo path: its
                                           directory name; "multi" for several); prints the id.
                                           --breaking: never held by focus mode
+  chartroom inbox list [--json]           the open inbox items (Waiting, Approvals)
   chartroom inbox project <i-xxxx> <P>    label (or relabel) an open Waiting item with [P]
   chartroom inbox tag                     give every untagged Waiting item its id (idempotent)
   chartroom artifact add <id> --kind message|runbook|note --title T [--slug S] <file|->
@@ -1293,7 +1358,8 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           [held] <event>" for a project out of focus)
   chartroom dashboard [--port N] [--open] [--daemon] [--no-gh] [--theme chartroom|hud]
                       [--host ADDR | --expose] [--no-token]
-                                          read-only web view (127.0.0.1, default port 4517):
+                                          read-only web view (127.0.0.1, port
+                                          CHARTROOM_DASHBOARD_PORT, default 4517):
                                           needs you / in progress / on hold / ready / recently
                                           finished. Needs python3. The theme default is
                                           CHARTROOM_DASHBOARD_THEME (chartroom). --host binds
@@ -1327,8 +1393,18 @@ EOF
 }
 
 cmd="${1:-help}"; shift || true
+# The read-only view across every home (lib/homes.sh): status, board, todo, inbox list.
+if [[ "$cmd" =~ ^(status|ls|board|todo|inbox)$ ]]; then
+  for _a in "$@"; do
+    [[ "$_a" == --all-homes ]] || continue
+    [[ "$cmd" == ls ]] && cmd=status
+    [[ "$cmd" == todo && "${1:-}" =~ ^(done|add)$ ]] && die "todo $1 acts on one home; run it there"
+    [[ "$cmd" == inbox && "${1:-}" != list ]] && die "--all-homes goes with inbox list only (the rest acts on one home)"
+    all_homes "$cmd" "$@"; exit
+  done
+fi
 case "$cmd" in
-  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|artifact|rule|focus|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|version|help) "cmd_$cmd" "$@" ;;
+  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|artifact|rule|focus|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|homes|version|help) "cmd_$cmd" "$@" ;;
   install-skills) cmd_install_skills "$@" ;;
   ls) cmd_status "$@" ;;
   show) cmd_show "$@" ;;

@@ -27,7 +27,7 @@ import { Markdown, matchesKey, truncateToWidth } from '@earendil-works/pi-tui'
 import type { Component, TUI } from '@earendil-works/pi-tui'
 
 import type { CrewBoard, CrewDetail, TodoItem, TodoList } from '../crew-view/types'
-import { bandSegments, configPath, detailActions, detailLines, isUnderWorktrees, paneLines, parseBoard, parseDetail, resolveHome, samePath } from '../crew-view/hooks/crew'
+import { bandSegments, configPath, detailActions, detailLines, homesPath, isUnderWorktrees, paneLines, parseBoard, parseDetail, resolveHome, samePath } from '../crew-view/hooks/crew'
 import type { ActionId, PaneLine, Tone } from '../crew-view/hooks/crew'
 import { doneRefusal, parseTodo, todoActions, todoBandLines, todoKey, todoPaneLines } from '../crew-view/hooks/todo'
 import type { TodoActionId } from '../crew-view/hooks/todo'
@@ -50,10 +50,13 @@ function detectXo(ctx: ExtensionContext): string | null {
   const home = env.HOME ?? ''
   if (!home) return null
   const cfg = configPath({ chartroomConfig: env.CHARTROOM_CONFIG, xdgConfigHome: env.XDG_CONFIG_HOME, home })
+  const homes = homesPath(cfg)
   const chartroomHome = resolveHome({
     chartroomHome: env.CHARTROOM_HOME,
     capHome: env.CAP_HOME,
     configText: existsSync(cfg) ? readFileSync(cfg, 'utf8') : undefined,
+    homesText: existsSync(homes) ? readFileSync(homes, 'utf8') : undefined,
+    cwd: ctx.cwd,
     home,
     hasChartroomDir: existsSync(`${home}/.chartroom`),
     hasCaptainDir: existsSync(`${home}/.captain`),

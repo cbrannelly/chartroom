@@ -64,45 +64,101 @@ new_uuid() {
 bin_of() { type -P "$1" 2>/dev/null || true; }
 
 # ---------------------------------------------------------------- config
-# Precedence: CHARTROOM_* env > legacy CAP_* env > config file > default.
+# Precedence: CHARTROOM_* env > legacy CAP_* env > the home's own config > config file > default.
 # The config file is KEY=VALUE lines (no shell evaluation), at
-# ${XDG_CONFIG_HOME:-~/.config}/chartroom/config or $CHARTROOM_CONFIG.
+# ${XDG_CONFIG_HOME:-~/.config}/chartroom/config or $CHARTROOM_CONFIG. A home may hold its
+# own `config` in the same format (several homes on one machine: each its own workspace,
+# dashboard port, project roots); it can set any key but CHARTROOM_HOME and CHARTROOM_PLATFORM,
+# which are read before the home is known.
 
 CR_CONFIG_FILE="${CHARTROOM_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/chartroom/config}"
+# The homes on this machine (lib/homes.sh): `name=path` lines, next to the config file.
+CR_HOMES_FILE="${CR_CONFIG_FILE%/*}/homes"
+CR_HOME_CONFIG=""
+declare -A CR_HOME_CFG=()
 
 # A trailing CR (a file saved by a Windows editor) is not part of the value.
-cfg_file_value() { # <KEY>
-  [[ -f "$CR_CONFIG_FILE" ]] || return 0
+cfg_value_in() { # <file> <KEY>
+  [[ -f "$1" ]] || return 0
   local cr=$'\r'
-  sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CR_CONFIG_FILE" | tail -1 | sed -E "s/$cr\$//; "'s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/'
+  sed -nE "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" | tail -1 | sed -E "s/$cr\$//; "'s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/'
+}
+cfg_file_value() { cfg_value_in "$CR_CONFIG_FILE" "$1"; } # <KEY>
+
+# The home's own config, read once into CR_HOME_CFG (the same rules as cfg_value_in).
+load_home_config() {
+  CR_HOME_CFG=(); CR_HOME_CONFIG="$CR_HOME/config"
+  [[ -f "$CR_HOME_CONFIG" ]] || return 0
+  local k v cr=$'\r'
+  while IFS=$'\t' read -r k v; do
+    [[ "$k" == CHARTROOM_HOME || "$k" == CHARTROOM_PLATFORM ]] && continue
+    CR_HOME_CFG[$k]="$v"
+  done < <(sed -nE $'s/^[[:space:]]*(CHARTROOM_[A-Z0-9_]+)[[:space:]]*=[[:space:]]*/\\1\t/p' "$CR_HOME_CONFIG" |
+    sed -E "s/$cr\$//; "$'s/\t"(.*)"$/\t\\1/; s/\t\'(.*)\'$/\t\\1/')
 }
 
 cfg() { # <SUFFIX> <legacy CAP_ name or ""> <default>
   local name="CHARTROOM_$1" legacy="$2" def="$3" v
   v="${!name:-}"
   [[ -z "$v" && -n "$legacy" ]] && v="${!legacy:-}"
+  [[ -z "$v" ]] && v="${CR_HOME_CFG[$name]:-}"
   [[ -z "$v" ]] && v="$(cfg_file_value "$name")"
   printf '%s' "${v:-$def}"
 }
 
-# Home: explicit env wins; then legacy CAP_HOME; then ~/.chartroom if it exists;
-# then a pre-existing ~/.captain (legacy); else ~/.chartroom.
+# The registered homes, one "<name><TAB><path>" line each (~ expanded, no trailing slash; the
+# last line for a name wins). Prints nothing without a homes file.
+homes_entries() {
+  [[ -f "$CR_HOMES_FILE" ]] || return 0
+  local cr=$'\r'
+  sed -nE $'s/^[[:space:]]*([a-z][a-z0-9-]*)[[:space:]]*=[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\\1\t\\2/p' "$CR_HOMES_FILE" |
+    sed -E "s/$cr\$//; "$'s/\t"(.*)"$/\t\\1/; s/\t\'(.*)\'$/\t\\1/; s#/+$##' |
+    awk -F'\t' -v home="$HOME" '{ p = $2; if (p == "~" || substr(p, 1, 2) == "~/") p = home substr(p, 2); n[$1] = p; if (!($1 in seen)) { seen[$1] = 1; o[++k] = $1 } }
+      END { for (i = 1; i <= k; i++) print o[i] "\t" n[o[i]] }'
+}
+
+# The registered home that <dir> is, or lies inside (the nearest), as "<name><TAB><path>".
+# Paths compare as given and physically (symlinks resolved).
+home_of_dir() { # <dir>
+  local dir="${1%/}" phys name p q best="" blen=0 c
+  phys="$(cd "$dir" 2>/dev/null && pwd -P)" || phys="$dir"
+  while IFS=$'\t' read -r name p; do
+    [[ -n "$p" ]] || continue
+    for q in "$p" "$(cd "$p" 2>/dev/null && pwd -P)"; do
+      [[ -n "$q" ]] || continue
+      for c in "$dir" "$phys"; do
+        if [[ "$c" == "$q" || "$c" == "$q"/* ]] && (( ${#q} > blen )); then best="$name"$'\t'"$p"; blen=${#q}; fi
+      done
+    done
+  done < <(homes_entries)
+  [[ -n "$best" ]] && printf '%s\n' "$best"
+}
+
+# Home: explicit env wins; then legacy CAP_HOME; then the registered home this directory is (or
+# lies inside); then the config file; then ~/.chartroom if it exists; then a pre-existing
+# ~/.captain (legacy); else ~/.chartroom.
 resolve_home() {
   CR_HOME_SOURCE="env"
   if [[ -n "${CHARTROOM_HOME:-}" ]]; then CR_HOME="$CHARTROOM_HOME"; return; fi
   if [[ -n "${CAP_HOME:-}" ]]; then CR_HOME="$CAP_HOME"; CR_HOME_SOURCE="legacy env CAP_HOME"; return; fi
-  local f; f="$(cfg_file_value CHARTROOM_HOME)"
+  local f n
+  if [[ -f "$CR_HOMES_FILE" ]] && f="$(home_of_dir "$PWD")" && [[ -n "$f" ]]; then
+    n="${f%%$'\t'*}"; CR_HOME="${f#*$'\t'}"; CR_HOME_SOURCE="registered home $n, from the current directory"; return
+  fi
+  f="$(cfg_file_value CHARTROOM_HOME)"
   if [[ -n "$f" ]]; then CR_HOME="${f/#\~/$HOME}"; CR_HOME_SOURCE=config; return; fi
   if [[ -d "$HOME/.chartroom" || ! -d "$HOME/.captain" ]]; then CR_HOME="$HOME/.chartroom"; CR_HOME_SOURCE=default
   else CR_HOME="$HOME/.captain"; CR_HOME_SOURCE="legacy ~/.captain"; fi
 }
 
 load_config() {
+  CR_HOME_CFG=(); CR_HOME_CONFIG=""
   detect_platform
   resolve_home
   # Git Bash: a Windows-form home (C:\chartroom\home, as a Windows tool would pass it)
   # becomes /c/chartroom/home, so globs and path joins keep working.
   if [[ "$CR_PLATFORM" == msys && "$CR_HOME" =~ ^[A-Za-z]:[\\/] ]]; then CR_HOME="$(cygpath -u "$CR_HOME")"; fi
+  load_home_config
   CR_PROJECT_ROOTS="$(cfg PROJECT_ROOTS CAP_PROJECT_ROOTS '')"
   CR_PROJECT_ROOTS="${CR_PROJECT_ROOTS//\~/$HOME}"
   CR_WORKSPACE="$(cfg WORKSPACE CAP_CREW_WORKSPACE chartroom-crew)"
