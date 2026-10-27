@@ -1018,6 +1018,12 @@ function render(d) {
       foot.append(el("div", { class: "approvals", text: "Approvals given in chat, not yet in a brief:" },
         el("ul", {}, ...d.inbox.approvals.map((a) => el("li", { text: (a.date ? a.date + " — " : "") + (a.project ? "[" + a.project + "] " : "") + a.text })))));
     }
+    // Relays from other homes' XOs: the XO weighs them, so a list here, never cards (or todo items).
+    if (k === "needs_you" && d.inbox && d.inbox.relays && d.inbox.relays.length) {
+      foot.append(el("div", { class: "approvals relays", text: "Relays from other homes, for the XO to weigh:" },
+        el("ul", {}, ...d.inbox.relays.map((r) => el("li", { title: r.at || "", text: "[" + r.id + "] [from " + r.from + "] "
+          + (r.project ? "[" + r.project + "] " : "") + (r.re ? "(re " + r.re + ") " : "") + r.text.replace(/\s+/g, " ") })))));
+    }
   }
 
   // Cards that left the board fade out where they were.

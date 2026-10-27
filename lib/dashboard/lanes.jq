@@ -1,6 +1,8 @@
 # lanes.jq - classify status rows into dashboard lanes. Input: the array of task rows built
 # by dashboard_json (status_rows + dashboard_task_extra). Arguments:
-#   $inbox    {waiting:[{short_id,date,project,text}], approvals:[...]} from inbox.md
+#   $inbox    {waiting:[{short_id,date,project,text}], approvals:[...]} from inbox.md, and
+#             relays:[{id,from,at,text,re,project,...}], the open relays from other homes
+#             (lib/relay.sh): not cards, since they are the XO's to weigh, not the commander's
 #   $prs      {url: {state, reviewDecision, isDraft}} (empty when gh is absent or disabled)
 #   $hours    how far back "Recently finished" reaches
 #   $artifacts        the open artifacts (artifacts_json --open); each card carries its own
@@ -87,7 +89,7 @@ now as $now
       ready: (lane("ready") | by_recent),
       recent: ((lane("recent") | map(.finished_at = (.closed // .last_at))) | sort_by(.finished_at // "") | reverse)
     },
-    inbox: {waiting: ($inbox.waiting | length), approvals: $inbox.approvals},
+    inbox: {waiting: ($inbox.waiting | length), approvals: $inbox.approvals, relays: ($inbox.relays // [])},
     artifacts: $artifact_counts
   }
 | .counts = (.lanes | map_values(length))

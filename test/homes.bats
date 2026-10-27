@@ -10,9 +10,6 @@ setup() {
   A="$BATS_TEST_TMPDIR/acme"; B="$BATS_TEST_TMPDIR/globex"
 }
 
-# Every file under the given dirs with its checksum, to show a run wrote nothing.
-snapshot() { find "$@" -type f -exec cksum {} + | sort; }
-
 @test "a home's own config wins over the config file, and the environment over both" {
   cr init >/dev/null
   printf 'CHARTROOM_WORKSPACE=from-file\nCHARTROOM_BRANCH_PREFIX=file/\n' >"$CHARTROOM_CONFIG"

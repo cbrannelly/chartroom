@@ -94,7 +94,7 @@ dashboard_task_extra() { # <id>
     last_event_at: (if $report == "" then null else ($report[0:20]) end)}'
 }
 
-# The board: status rows + extras + inbox + open artifacts, classified into lanes by
+# The board: status rows + extras + inbox (with the open relays from other homes) + open artifacts, classified into lanes by
 # lib/dashboard/lanes.jq, plus the commander's next steps (.todo, lib/todo.jq). <pr-states> is an optional JSON file {url: {state, reviewDecision,
 # isDraft}} (the server fills it from gh); without it every PR is "unknown" and nothing
 # depends on gh.
@@ -110,7 +110,7 @@ dashboard_json() { # [pr-states-file]
   if [[ -n "$prs_file" && -s "$prs_file" ]]; then prs="$(jq -c 'if type == "object" then . else {} end' "$prs_file" 2>/dev/null || echo '{}')"; fi
   arts="$(artifacts_json --open)"
   printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s \
-    --argjson inbox "$(dashboard_inbox)" --argjson prs "$prs" --argjson hours "$hours" \
+    --argjson inbox "$(inbox_with_relays)" --argjson prs "$prs" --argjson hours "$hours" \
     --argjson artifacts "$arts" --argjson artifact_counts "$(jq -c "$ARTIFACT_COUNTS_JQ" <<<"$arts")" \
     --arg home "$CR_HOME" --arg home_name "$(home_name_of "$CR_HOME")" --arg version "$CR_VERSION" --argjson focus "$(focus_json)" \
     -f "$CR_ROOT/lib/dashboard/lanes.jq" |

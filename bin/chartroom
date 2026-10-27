@@ -15,6 +15,8 @@
 #   rulings.log             append-only commander rulings, latest wins per topic (lib/rulings.sh)
 #   focus.json              the project(s) in focus while focus mode is on (lib/focus.sh)
 #   config                  this home's own settings, over the config file (lib/core.sh)
+#   relays/inbox.ndjson     relays from other homes' XOs, and their acks (lib/relay.sh)
+#   relays/outbox.ndjson    the relays this home sent
 #
 # Usage: chartroom <command> [args]   (chartroom help for the list)
 
@@ -79,6 +81,8 @@ source "$CR_ROOT/lib/todo.sh"
 source "$CR_ROOT/lib/focus.sh"
 # shellcheck source=../lib/homes.sh
 source "$CR_ROOT/lib/homes.sh"
+# shellcheck source=../lib/relay.sh
+source "$CR_ROOT/lib/relay.sh"
 for _f in "$CR_ROOT"/lib/backends/*.sh; do
   # shellcheck source=/dev/null
   source "$_f"
@@ -721,6 +725,7 @@ cmd_status() {
       { printf 'ID\tPROJECT\tSTATE\tLIVE\tBACKEND\tKIND\tLAST\n'; cat; } | table
   fi
   inbox_line
+  relay_line
   artifact_line
 }
 
@@ -833,19 +838,24 @@ cmd_inbox() {
         { print }' -v tag="$tag" -v out="$out"
       if [[ -s "$out" ]]; then cat "$out"; rm -f "$out"; else rm -f "$out"; die "no open inbox item $tag"; fi
       ;;
-    list) # list [--json]: the open items (Waiting on the commander, Approvals), read-only
+    list) # list [--json]: the open items (Waiting on the commander, Approvals, relays from other homes), read-only
       local json=0 a
       for a in "$@"; do case "$a" in --json) json=1 ;; *) die "inbox list: unknown arg $a" ;; esac; done
-      if [[ $json -eq 1 ]]; then dashboard_inbox; return; fi
-      dashboard_inbox | jq -r '
+      if [[ $json -eq 1 ]]; then inbox_with_relays; return; fi
+      inbox_with_relays | jq -r "$RELAY_LINE_JQ"'
         def line: "- " + (if .short_id then "[\(.short_id)] " else "" end) + (if .date then .date + " — " else "" end)
           + (if .project then "[\(.project)] " else "" end) + .text + (if .held then "  (held)" else "" end);
-        if (.waiting | length) + (.approvals | length) == 0 then "inbox: nothing open"
+        if (.waiting | length) + (.approvals | length) + (.relays | length) == 0 then "inbox: nothing open"
         else (if (.waiting | length) > 0 then "Waiting on the commander:", (.waiting[] | line) else empty end),
-             (if (.approvals | length) > 0 then "Approvals not yet in a brief:", (.approvals[] | line) else empty end) end' ;;
+             (if (.approvals | length) > 0 then "Approvals not yet in a brief:", (.approvals[] | line) else empty end),
+             (if (.relays | length) > 0 then "Relays from other homes (for the XO to weigh):", (.relays[] | relay_line) else empty end) end' ;;
     *) die "usage: chartroom inbox add [--project P] [--breaking] <text> | inbox list [--json] [--all-homes] | inbox project <i-xxxx> <project> | inbox tag" ;;
   esac
 }
+
+# The open inbox items plus the open relays from other homes (lib/relay.sh), as `inbox list --json`
+# prints them: {waiting, approvals, relays}.
+inbox_with_relays() { dashboard_inbox | jq -c --argjson r "$(relays_json)" '. + {relays: $r}'; }
 
 # Map a full or short id back to what it names. Prints the task id, or the inbox tag;
 # --json prints the task's status row (type "task") or the inbox item (type "inbox").
@@ -953,7 +963,8 @@ cmd_close() {
 
 # One stream for the whole fleet. Every stdout line is a wake: a worker
 # decision/blocker/done/failure, a process ending, an agent stopping its turn or waiting
-# on a prompt, a worker vanishing, or a stopped worker's `waiting` window running out.
+# on a prompt, a worker vanishing, a stopped worker's `waiting` window running out, or a
+# relay from another home's XO ("[relay rl-xxxx] [from <home>] ...", lib/relay.sh).
 # Routine progress, and a turn that ends right after `waiting`, are never printed.
 #   chartroom watch                      run forever (e.g. under Claude Code's Monitor)
 #   chartroom watch --once [--timeout S] block until the first wake(s), print them, exit 0;
@@ -965,13 +976,18 @@ CURSOR_FILE="$CR_HOME/.watch-cursor"
 
 # The --once cursor is created once, at the current end of every log, so history is
 # never replayed; tasks created after that are absent from it and are read from byte 0.
+# The relay mailbox (lib/relay.sh) is kept under @relays, which no task id can be.
 ensure_cursor() {
   [[ -f "$CURSOR_FILE" ]] && return 0
-  local d
+  local d r
   shopt -s nullglob
-  for d in "$CR_HOME"/tasks/*/; do
-    [[ -f "$d/events.log" ]] && printf '%s\t%s\n' "$(basename "$d")" "$(($(wc -c <"$d/events.log")))"
-  done >"$CURSOR_FILE"
+  {
+    for d in "$CR_HOME"/tasks/*/; do
+      [[ -f "$d/events.log" ]] && printf '%s\t%s\n' "$(basename "$d")" "$(($(wc -c <"$d/events.log")))"
+    done
+    r="$(relay_dir)/inbox.ndjson"
+    if [[ -f "$r" ]]; then printf '@relays\t%s\n' "$(($(wc -c <"$r")))"; fi
+  } >"$CURSOR_FILE"
 }
 WOKE=0
 WATCH_FOCUS=null # the focus in force, re-read each round
@@ -1050,6 +1066,8 @@ cmd_watch() {
     [[ $fresh -eq 1 && -f "$f" && -z "${OFF[$id]+x}" ]] && OFF[$id]=$(($(wc -c <"$f")))
     [[ -f "$d/meta.json" && "$(backend_runner "$id" 2>/dev/null)" == herdr ]] && HST[$id]="$(herdr_status "$id" 2>/dev/null || true)"
   done
+  f="$(relay_dir)/inbox.ndjson"
+  if [[ $fresh -eq 1 && -f "$f" && -z "${OFF[@relays]+x}" ]]; then OFF[@relays]=$(($(wc -c <"$f"))); fi
   while true; do
     WATCH_FOCUS="$(focus_json)"
     for d in "$CR_HOME"/tasks/*/; do
@@ -1064,6 +1082,7 @@ cmd_watch() {
       local r; r="$(backend_runner "$id")"
       if [[ -n "$r" && -n "$(meta "$id" dispatched)" ]]; then "${r}_watch" "$id"; watch_overdue "$id"; fi
     done
+    watch_relays
     if [[ -n "$cursor" ]]; then
       for id in "${!OFF[@]}"; do printf '%s\t%s\n' "$id" "${OFF[$id]}"; done >"$cursor.tmp" && mv "$cursor.tmp" "$cursor"
     fi
@@ -1279,7 +1298,7 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           active security exposure, data loss) is never held by
                                           focus mode
   chartroom status [--json] [--all]       fleet view, derived from disk + live backends
-  chartroom status|board|todo|inbox list ... --all-homes
+  chartroom status|board|todo|inbox list|relay list ... --all-homes
                                           the same, read-only, in every home on this machine,
                                           one "== <home>" section each (--json: an array of
                                           {home, path, current, result})
@@ -1297,9 +1316,23 @@ chartroom - run a crew of coding agents from one agent session (the XO)
                                           stable id, labelled [P] (a name, or a repo path: its
                                           directory name; "multi" for several); prints the id.
                                           --breaking: never held by focus mode
-  chartroom inbox list [--json]           the open inbox items (Waiting, Approvals)
+  chartroom inbox list [--json]           the open inbox items (Waiting, Approvals) and the
+                                          open relays from other homes
   chartroom inbox project <i-xxxx> <P>    label (or relabel) an open Waiting item with [P]
   chartroom inbox tag                     give every untagged Waiting item its id (idempotent)
+  chartroom relay <home> [--re <rl-id>] [--project P] [--from <this home>] <message|->
+                                          a note or request for another home's XO (a registered
+                                          home on this machine): one record appended to its
+                                          relays/inbox.ndjson, nothing else written there; its
+                                          watch wakes with "[relay <id>] [from <this home>]
+                                          <text>". A copy stays in this home's
+                                          relays/outbox.ndjson; prints the id. --re: a reply to
+                                          that relay; - reads the message from stdin. At most
+                                          2000 bytes; refused when it looks like it holds a
+                                          secret. (A home named ack or list cannot be relayed to)
+  chartroom relay ack <rl-id>...          mark relays received here as handled
+  chartroom relay list [--all] [--json]   the open relays received here (--all: acked and sent
+                                          ones too)
   chartroom artifact add <id> --kind message|runbook|note --title T [--slug S] <file|->
                                           keep text drafted for the commander (a message to
                                           send, commands to run, a note) with a task or an
@@ -1355,7 +1388,9 @@ chartroom - run a crew of coding agents from one agent session (the XO)
   chartroom peek <id> [n]                 recent events and worker output
   chartroom watch [--once [--timeout S]]  wake stream: one line per event that needs the XO,
                                           "[<id>] [<project>] <event>" ("[<id>] [<project>]
-                                          [held] <event>" for a project out of focus)
+                                          [held] <event>" for a project out of focus), and one
+                                          per relay from another home, "[relay <id>] [from
+                                          <home>] [<project>] [re <id>] <text>"
   chartroom dashboard [--port N] [--open] [--daemon] [--no-gh] [--theme chartroom|hud]
                       [--host ADDR | --expose] [--no-token]
                                           read-only web view (127.0.0.1, port
@@ -1393,18 +1428,19 @@ EOF
 }
 
 cmd="${1:-help}"; shift || true
-# The read-only view across every home (lib/homes.sh): status, board, todo, inbox list.
-if [[ "$cmd" =~ ^(status|ls|board|todo|inbox)$ ]]; then
+# The read-only view across every home (lib/homes.sh): status, board, todo, inbox list, relay list.
+if [[ "$cmd" =~ ^(status|ls|board|todo|inbox|relay)$ ]]; then
   for _a in "$@"; do
     [[ "$_a" == --all-homes ]] || continue
     [[ "$cmd" == ls ]] && cmd=status
     [[ "$cmd" == todo && "${1:-}" =~ ^(done|add)$ ]] && die "todo $1 acts on one home; run it there"
     [[ "$cmd" == inbox && "${1:-}" != list ]] && die "--all-homes goes with inbox list only (the rest acts on one home)"
+    [[ "$cmd" == relay && "${1:-}" != list ]] && break # a relay's words are its own; relay_send refuses a stray flag
     all_homes "$cmd" "$@"; exit
   done
 fi
 case "$cmd" in
-  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|artifact|rule|focus|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|homes|version|help) "cmd_$cmd" "$@" ;;
+  init|project|new|join|listen|worktree|dispatch|event|hook|status|board|resolve|inbox|relay|artifact|rule|focus|peek|steer|stop|attach|close|sweep|watch|dashboard|doctor|homes|version|help) "cmd_$cmd" "$@" ;;
   install-skills) cmd_install_skills "$@" ;;
   ls) cmd_status "$@" ;;
   show) cmd_show "$@" ;;

@@ -86,6 +86,10 @@ new_task() {
   printf '%s' "$id"
 }
 
+# Every file under the given dirs with its checksum, to show a run wrote nothing (or only what
+# it should).
+snapshot() { find "$@" -type f -exec cksum {} + | sort; }
+
 events() { cat "$CHARTROOM_HOME/tasks/$1/events.log"; }
 meta_of() { jq -r --arg k "$2" '.[$k] // empty' "$CHARTROOM_HOME/tasks/$1/meta.json"; }
 
