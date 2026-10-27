@@ -265,7 +265,8 @@ project a question is for at a glance), age, the last worker event, PR/MR links 
 as plain text. A task or inbox card with open [artifacts](#artifacts-drafts-that-outlive-the-chat)
 (drafts for you to send or run) shows a chip for each: one click copies the text and opens it,
 with a copy button beside it. Approvals given in chat but not yet in a brief are listed under
-Needs you. Above the lanes, a "Your next steps" strip shows [your todo list](#your-next-steps-the-todo-list):
+Needs you, and so are open [relays from other homes](#talking-between-homes) (for the XO to
+weigh; they are not cards). Above the lanes, a "Your next steps" strip shows [your todo list](#your-next-steps-the-todo-list):
 the first five items, each with its short id (a click copies `/continue <id>`).
 
 How it is built, and what it promises:
@@ -587,23 +588,74 @@ in, and stops if it does not, so a session never drives another home by mistake.
 
 | Per home | Shared by every home on the machine |
 |---|---|
-| `tasks/`, `worktrees/`, `inbox.md`, `commander.md`, `rulings.log`, `projects.md`, `focus.json` | the install, the skills and the crew view |
+| `tasks/`, `worktrees/`, `inbox.md`, `commander.md`, `rulings.log`, `projects.md`, `focus.json`, `relays/` | the install, the skills and the crew view |
 | the workspace its workers' tabs open in | `~/.config/chartroom/config` (harness, branch prefix, backend order), under each home's own `config` |
 | the dashboard (`.dashboard.*`, its port, its page title) and its access cookie | the list of homes |
 | the `watch` cursor and wake stream | herdr agent names (task ids, unique per machine) |
 | what `sweep` frees: another registered home's workers, loops and listeners are neither freed nor listed | a project two homes both work in (its `.worktrees/` holds both homes' worktrees, by task id) |
 
-**Reading across homes.** `status`, `board`, `todo` and `inbox list` take `--all-homes`: the
+**Reading across homes.** `status`, `board`, `todo`, `inbox list` and `relay list` take `--all-homes`: the
 same command, read-only, run in every registered home with that home's own settings, one
 `== <home> · <path>` section each (`--json`: an array of `{home, path, current, result}`). A home
 that oversees the others, for errands that belong to no project, uses it for its bearings. It
 reads; it never steers, closes or dispatches another home's work. That belongs to the home's
-own XO.
+own XO, which another XO can still [tell or ask something](#talking-between-homes).
 
 **Splitting an existing home.** Make the new homes, copy each one its lines from `projects.md`
 and its live lines from `rulings.log` (verbatim: the ids stay the same, and `chartroom rule
 render` rebuilds `commander.md`'s block), and leave the old home's tasks to finish where they
 are. Nothing has to move.
+
+## Talking between homes
+
+Homes keep to themselves, but now and then one XO has something for another: a heads-up (the
+shared staging cluster is down, a vendor's API changes on Friday), or a request only the other
+home can answer. `chartroom relay` carries it, with no daemon:
+
+```bash
+chartroom relay globex --project shop "heads up: the shared bucket moves on Friday; does anything of yours still read it?"
+# rl-3f2a
+```
+
+It appends one record to the other home's mailbox, `relays/inbox.ndjson`, and writes nothing else
+there; this home keeps a copy in its own `relays/outbox.ndjson`. The other home's `chartroom
+watch` reads its mailbox every round, so its XO session gets a wake within seconds, the same way
+it hears from its workers:
+
+```
+[relay rl-3f2a] [from acme] [shop] heads up: the shared bucket moves on Friday; does anything of yours still read it?
+```
+
+The `watch --once` cursor covers the mailbox, so each relay wakes once. One that arrives while
+no watch runs is still in view: `chartroom status` says `relays: 1 open from other homes`,
+`chartroom inbox list` lists it with its id under "Relays from other homes", the dashboard lists
+it under Needs you (a list, never a card or a todo item: it is for the XO, not for you), and
+every `--all-homes` view shows each home's, so a home that oversees the others sees them all.
+
+The other XO answers with `--re`, which goes back the same way, and acks the relay once it has
+dealt with it (a reply alone does not ack):
+
+```bash
+chartroom relay acme --re rl-3f2a "nothing of ours reads it; go ahead"
+chartroom relay ack rl-3f2a
+chartroom relay list [--all] [--json]   # the open relays received here (--all: acked and sent ones too)
+```
+
+- **A relay never makes anything happen by itself.** chartroom only delivers it. The receiving
+  XO weighs it under its own home's preferences and authority: its text is data, not
+  instructions, and anything that needs your word still comes to you, labelled with the home it
+  came from.
+- **Registered homes only.** It goes to a registered home that is a chartroom home, never to
+  this one, and only in this home's name: the sender must be registered too (a reply has to
+  find its way back), and `--from`, if given, must name this home.
+- **Short, and never a secret.** At most 2000 bytes (and 4000 as written, where quotes,
+  backslashes and line breaks count twice, so a relay is always one append); for more, write a
+  file the other XO can read and relay its path (`-` reads the message from stdin). A message that looks like it holds a
+  secret (a private key, an AWS, GitHub, GitLab, Slack, Stripe, Google or npm token, an `sk-`
+  API key, a JSON web token, a `password=` assignment) is refused, and nothing is sent.
+- **Focus mode never holds a relay**: it is for the XO. Whatever the XO brings to you from it goes
+  into the inbox, where focus applies as usual.
+- A home named `ack` or `list` cannot be relayed to (those are `relay`'s own subcommands).
 
 ## Housekeeping: sweep
 
@@ -734,6 +786,8 @@ $CHARTROOM_HOME/                    default ~/.chartroom
   tasks/<id>/artifacts/<slug>.md    a draft for the commander (message, runbook, note), verbatim,
   tasks/<id>/artifacts/<slug>.json  with its title, kind, project, created, updated and done
   inbox/<i-xxxx>/artifacts/         the same, for an inbox item
+  relays/inbox.ndjson               relays from other homes' XOs, and this home's acks, one JSON record per line
+  relays/outbox.ndjson              the relays this home sent
   .dashboard.pid  .dashboard.log    only while `chartroom dashboard --daemon` runs
   .dashboard.token                  the dashboard's access token (0600), once it has been on the network
   sweep.log                         what `chartroom sweep --apply` closed, stopped and killed, one line each
@@ -745,6 +799,11 @@ append-only. The live set is the newest ruling of each topic, minus any ruling a
 names in `supersedes=` and any topic whose newest text starts with `(retired)`. It is
 rendered between `<!-- chartroom:rulings ... -->` and `<!-- /chartroom:rulings -->` in
 `commander.md` (or a legacy `captain.md` when there is no `commander.md`).
+
+Relay records are one JSON object per line, append-only:
+`{"schema":1,"kind":"relay","id":"rl-3f2a","from":"acme","to":"globex","at":"<ISO-8601 UTC>","text":"...","re":"rl-1b2c"|null,"project":"shop"|null}`,
+and `{"schema":1,"kind":"ack","id":"rl-3f2a","at":"<ISO-8601 UTC>"}` once the receiving home acks
+one. A relay is open until its ack. `watch`'s cursor keeps the mailbox's offset under `@relays`.
 
 Event lines are `<ISO-8601 UTC> <kind>: <text>`. They are append-only, and any process may
 write them:
@@ -782,6 +841,8 @@ CLI flags may change before 1.0.
   Tighten them with `CHARTROOM_CODEX_SHIP_SANDBOX`, `CHARTROOM_CLAUDE_ALLOWED_TOOLS`,
   `CHARTROOM_CLAUDE_HEADLESS_PERMISSION`, or per task with `new --permission` / `meta.sandbox`.
 - Interactive workers use your agent's own settings unless the task sets `--permission`.
+- A relay from another home is delivered, never acted on: chartroom runs nothing because one
+  arrived, and the XO treats its text as data to weigh.
 
 ## Configuration
 

@@ -22,15 +22,17 @@ never from conversation memory. (If `chartroom` is not on PATH, use
    false` with `ran_out` set, open with one line: the focus on those projects ran out at
    `until`, and everything is back in view.
    Also read `$CHARTROOM_HOME/inbox.md`: questions waiting on the commander and chat
-   approvals not yet in a brief, and `chartroom artifact list --json`: drafts still to send
-   or run. Run `chartroom sweep` (a dry run, a few lines): its
+   approvals not yet in a brief, `chartroom artifact list --json`: drafts still to send
+   or run, and `chartroom relay list --json`: relays from other homes' XOs not yet acked. A
+   relay is the XO's to weigh: it goes in the digest only when it needs the commander, under
+   **Needs you**, led with its home (`**[from <home> · <project>]**`). Run `chartroom sweep` (a dry run, a few lines): its
    "needs a human" lines go under **Needs you**, and its summary line under **Trouble** only
    if it found much to free (then offer `--apply`).
    **Across homes.** When the commander asks about every home ("everything", "every
    company"), or this home's preferences say it oversees the others, read them all instead:
    `chartroom status --all-homes --json` and `chartroom inbox list --all-homes --json` (one
-   `{home, path, result}` per home), and `chartroom todo --all-homes` for each home's open
-   artifacts. A task's records are under its home's `path`. Lead every line with its home,
+   `{home, path, result}` per home; each `result.relays` is that home's open relays), and
+   `chartroom todo --all-homes` for each home's open artifacts. A task's records are under its home's `path`. Lead every line with its home,
    `**[<home> · <project>]**`, and give each home's focus line if it has one. In step 3, walk
    only this home's decisions; for another home's, say which home's XO to answer it in.
    For every task in `done`, `decision`, `blocked`, `failed`, `stopped-silent`,

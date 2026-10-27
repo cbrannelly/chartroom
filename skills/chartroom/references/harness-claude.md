@@ -12,7 +12,8 @@ Monitor  command: chartroom watch
          description: chartroom fleet wakes   timeout_ms: 1800000
 ```
 
-Re-arm it when it expires and work is still in flight. If Monitor is unavailable, use the
+Re-arm it when it expires and work is still in flight. The same stream carries relays from
+other homes' XOs (`[relay <id>] [from <home>] ...`); there is no second watcher to run. If Monitor is unavailable, use the
 generic loop in `harness-generic.md`.
 
 ## In-session workers (`subagent` backend)

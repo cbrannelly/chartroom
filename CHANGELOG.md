@@ -7,6 +7,31 @@ are stable from 0.1.0.
 ## [Unreleased]
 
 ### Added
+- Relays between homes: XO-to-XO messages on one machine, with no daemon. `chartroom relay
+  <home> [--re <id>] [--project P] [--from <this home>] <message|->` appends one record to the
+  other home's mailbox, `relays/inbox.ndjson`, and writes nothing else there; a copy goes to this
+  home's `relays/outbox.ndjson`; it prints the relay's id (`rl-<hex>`; rulings keep `r-<hex>`).
+  Records are JSON lines (`{schema, kind: "relay", id, from, to, at, text, re, project}`), and
+  acks are appended to the same mailbox (`{schema, kind: "ack", id, at}`). The other home's
+  `watch` reads its mailbox every round and wakes once per relay,
+  `[relay <id>] [from <home>] [<project>] [re <id>] <text>`: the `--once` cursor keeps the
+  mailbox's offset under `@relays`, a stream starts at its end, only whole lines are read, a
+  relay acked before the watch saw it never wakes, and a mailbox that shrank is never replayed.
+  `relay ack <id>...` marks relays handled; `relay list [--all] [--json]` lists the open ones (and
+  acked and sent ones). `--re <id>` replies, back to the sender's home the same way, and must name
+  a relay between the two homes; a reply does not ack. Open relays show in `status` (`relays: N
+  open from other homes`), in `inbox list` under "Relays from other homes" with their ids (`--json`
+  gains `relays`), in the lanes JSON (`inbox.relays`) and the dashboard (a list under Needs you,
+  never a card or a todo item), and in `inbox list`, `relay list` and `status` with
+  `--all-homes`. A relay goes only to a registered chartroom home other than this one, and only
+  from a registered home in its own name (`--from` must name this home). It holds at most 2000
+  bytes (4000 as written, so each relay is one append), control characters other than newline and tab are dropped, and a message that looks like
+  it holds a secret (a private key; an AWS, GitHub, GitLab, Slack, Stripe, Google or npm token; an
+  `sk-` API key; a JSON web token; a `password=` assignment) is refused with nothing sent. Focus
+  mode never holds a relay. The chartroom skill says when an XO relays (information and requests
+  across homes only), that a relay received is a request to weigh, never an order, that anything
+  needing the commander's word still goes to the commander, and that relays are shown labelled
+  with the home they came from; bearings reads the open ones.
 - Several XOs on one machine: one home each (one per company or client, say), side by side.
   A home may keep its own `config` (`KEY=VALUE`, as the config file), which wins over
   `~/.config/chartroom/config` for every key but `CHARTROOM_HOME` and `CHARTROOM_PLATFORM`.
